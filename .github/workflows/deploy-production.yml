@@ -1,5 +1,13 @@
 name: Deploy Production
 
+# Promotion path: GitHub main -> GitHub Actions -> Production Supabase -> Cloudflare Pages -> nexarionsky.com
+#
+# DISABLED BY DEFAULT. This entire workflow is gated behind the repository variable
+# PRODUCTION_ENABLED=true. It must stay disabled until staging has passed the full
+# verification checklist (authentication, RLS, database, application, deployment) in
+# docs/PROVISIONING.md. To enable production deployment after staging verification:
+#   GitHub repo -> Settings -> Secrets and variables -> Actions -> Variables
+#   -> add PRODUCTION_ENABLED = true (repo-wide or on the production environment).
 on:
   push:
     branches: [main]
@@ -11,6 +19,7 @@ concurrency:
 jobs:
   migrate:
     name: Migrate production database
+    if: vars.PRODUCTION_ENABLED == 'true'
     runs-on: ubuntu-latest
     environment: production
     env:
@@ -35,6 +44,7 @@ jobs:
   build-deploy:
     name: Build and deploy to Cloudflare Pages (production)
     needs: migrate
+    if: vars.PRODUCTION_ENABLED == 'true'
     runs-on: ubuntu-latest
     environment: production
     env:

@@ -1,0 +1,83 @@
+name: Verify Staging
+
+# Post-deploy verification checklist for the STAGING environment, runnable on
+# demand from GitHub Actions after "Deploy Staging" succeeds. Covers the four
+# areas that must pass before production is enabled:
+#   application/deployment — staging site serves the built SPA
+#   database             — PostgREST is up and schema app is exposed
+#   RLS                  — unauthenticated/anon access cannot read app tables
+#   authentication       — GoTrue responds and rejects invalid credentials
+#
+# Deep functional checks (sign-up flow, bootstrap RPC, cross-tenant isolation
+# with two real accounts) are in docs/PROVISIONING.md section 6 and must be
+# done once in the browser; this workflow is the repeatable automated layer.
+on:
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    name: Staging smoke checks
+    runs-on: ubuntu-latest
+    environment: staging
+    env:
+      STAGING_URL: ${{ vars.STAGING_URL }}
+      VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+      VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+    steps:
+      - name: Check staging URL configured
+        run: |
+          if [ -z "$STAGING_URL" ]; then
+            echo "Set the staging environment variable STAGING_URL to the *.pages.dev URL after the first staging deploy."
+            exit 1
+          fi
+
+      - name: Application — staging serves the SPA
+        run: |
+          HTTP=$(curl -s -o index.html -w "%{http_code}" "$STAGING_URL/")
+          [ "$HTTP" = "200" ] || { echo "Expected 200, got $HTTP"; exit 1; }
+          grep -q '<div id="root">' index.html || { echo "index.html missing root div"; cat index.html; exit 1; }
+          ASSET=$(grep -oE '/assets/index-[^"]+\.js' index.html | head -1)
+          [ -n "$ASSET" ] || { echo "No hashed JS asset found in index.html"; exit 1; }
+          HTTP=$(curl -s -o /dev/null -w "%{http_code}" "$STAGING_URL$ASSET")
+          [ "$HTTP" = "200" ] || { echo "Asset $ASSET returned $HTTP"; exit 1; }
+          echo "SPA and asset served OK."
+
+      - name: Database — PostgREST up, app schema exposed
+        run: |
+          HTTP=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "apikey: $VITE_SUPABASE_ANON_KEY" \
+            -H "Authorization: Bearer $VITE_SUPABASE_ANON_KEY" \
+            "$VITE_SUPABASE_URL/rest/v1/")
+          [ "$HTTP" = "200" ] || { echo "PostgREST root returned $HTTP (expected 200)"; exit 1; }
+          # RPC route must exist (401 = exposed but auth-required; 404 = schema/function not exposed)
+          HTTP=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+            -H "apikey: $VITE_SUPABASE_ANON_KEY" \
+            -H "Authorization: Bearer $VITE_SUPABASE_ANON_KEY" \
+            -H "Content-Type: application/json" \
+            -d '{}' \
+            "$VITE_SUPABASE_URL/rest/v1/rpc/get_my_access")
+          [ "$HTTP" = "401" ] || { echo "rpc/get_my_access returned $HTTP (expected 401 for anon; 404 means schema app is not exposed)"; exit 1; }
+          echo "PostgREST and app schema exposed OK."
+
+      - name: RLS — anon cannot read app tables
+        run: |
+          for T in organizations branches profiles audit_log; do
+            HTTP=$(curl -s -o /dev/null -w "%{http_code}" \
+              -H "apikey: $VITE_SUPABASE_ANON_KEY" \
+              -H "Authorization: Bearer $VITE_SUPABASE_ANON_KEY" \
+              "$VITE_SUPABASE_URL/rest/v1/app/$T?select=*&limit=1")
+            [ "$HTTP" = "401" ] || { echo "app.$T returned $HTTP for anon (expected 401 — RLS not blocking)"; exit 1; }
+          done
+          echo "RLS blocks anon reads on all app tables."
+
+      - name: Authentication — GoTrue healthy, rejects bad credentials
+        run: |
+          HTTP=$(curl -s -o auth_health.json -w "%{http_code}" "$VITE_SUPABASE_URL/auth/v1/health")
+          [ "$HTTP" = "200" ] || { echo "auth health returned $HTTP"; cat auth_health.json; exit 1; }
+          HTTP=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+            -H "apikey: $VITE_SUPABASE_ANON_KEY" \
+            -H "Content-Type: application/json" \
+            -d '{"email":"smoke-check@example.invalid","password":"not-a-real-password"}' \
+            "$VITE_SUPABASE_URL/auth/v1/token?grant_type=password")
+          [ "$HTTP" = "400" ] || [ "$HTTP" = "401" ] || { echo "Bad-credential login returned $HTTP (expected 400/401)"; exit 1; }
+          echo "Auth service OK."

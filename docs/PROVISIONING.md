@@ -72,7 +72,8 @@ For each of **dev**, **staging**, **prod** (Settings → General after creation)
 
 | Variable | Value |
 |---|---|
-| `APP_CUSTOM_DOMAIN` | your live domain, e.g. `app.yourdomain.com` (the exact host Cloudflare should route to production) |
+| `APP_CUSTOM_DOMAIN` | `nexarionsky.com` — the exact host Cloudflare routes to the production deployment |
+| `PRODUCTION_ENABLED` | **Leave unset for now.** Set to `true` only after staging passes the full verification checklist (section 6, steps 1–4). While unset, **Deploy Production** skips every job on push to `main`, so production cannot deploy (or migrate) early. |
 
 ### Environments (Settings → Environments → New environment)
 
@@ -88,6 +89,7 @@ Secrets and variables **per environment**:
 | Secret `VITE_SUPABASE_URL` | dev Project URL | staging Project URL | prod Project URL |
 | Secret `VITE_SUPABASE_ANON_KEY` | dev anon key | staging anon key | prod anon key |
 | Variable `CLOUDFLARE_PAGES_PROJECT` | — | `nexarion-sky-staging` | `nexarion-sky` |
+| Variable `STAGING_URL` | — | `https://<your-staging>.pages.dev` (from the first staging deploy log) | — |
 
 > `SUPABASE_ACCESS_TOKEN`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` are
 > repository-level (above) and shared by the environments — rotate them on any
@@ -108,7 +110,7 @@ is not used; the projects are created empty and GitHub Actions uploads builds:
 
 ### DNS for the live domain
 
-`APP_CUSTOM_DOMAIN` (e.g. `app.yourdomain.com`) is attached to the production
+`APP_CUSTOM_DOMAIN` (`nexarionsky.com`) is attached to the production
 Pages project **automatically by the deploy workflow** (it calls the Cloudflare
 API; CNAME record is created in your zone). Requirements:
 
@@ -117,8 +119,9 @@ API; CNAME record is created in your zone). Requirements:
 - Cloudflare provisions the TLS certificate automatically after attachment —
   the domain answers HTTPS within minutes.
 
-If you prefer a root domain (`yourdomain.com`) instead of a subdomain, set
-`APP_CUSTOM_DOMAIN` to it; Pages supports apex custom domains too.
+If you prefer a different host (e.g. `app.nexarionsky.com`) instead of the
+apex domain, set `APP_CUSTOM_DOMAIN` to it; Pages supports apex custom
+domains too.
 
 ## 5. Supabase Auth configuration (per project)
 
@@ -131,8 +134,8 @@ Dashboard → Authentication → Sign In / Providers:
     (Authentication → Emails → SMTP) before going live so confirmation and
     password-reset mail doesn't come from the shared quota.
 - Authentication → URL Configuration:
-  - Site URL: staging → your `*.pages.dev` URL; production → `https://<APP_CUSTOM_DOMAIN>`.
-  - Redirect URLs: add the same URLs (wildcard `https://<APP_CUSTOM_DOMAIN>/**` is convenient).
+  - Site URL: staging → your `*.pages.dev` URL; production → `https://nexarionsky.com`.
+  - Redirect URLs: add the same URLs (wildcard `https://nexarionsky.com/**` is convenient).
 
 ## 6. First end-to-end verification
 
@@ -151,10 +154,18 @@ Dashboard → Authentication → Sign In / Providers:
    - Create a second account in an incognito window; it belongs to **no
      organization** — it must see the setup screen, not your data.
    - Audit page shows the `organization.bootstrap` entry.
-5. **Promote to production**: PR `develop` → `main` (required CI passes),
+   - Then run the automated layer: Actions → **Verify Staging** → Run workflow
+     (set the staging variable `STAGING_URL` first). It checks the SPA is
+     served, PostgREST/`app` schema are exposed, RLS blocks anonymous reads on
+     every `app` table, and Auth is healthy — all four must be green.
+5. **Enable production deployment** — only after steps 1–4 are green: set the
+   repository variable `PRODUCTION_ENABLED=true` (Settings → Secrets and
+   variables → Actions → Variables). Until then, pushes to `main` trigger
+   **Deploy Production** but every job is skipped.
+6. **Promote to production**: PR `develop` → `main` (required CI passes),
    merge → **Deploy Production** runs: migrate prod → deploy → attach
-   `APP_CUSTOM_DOMAIN` → verify step confirms the domain.
-6. Open `https://<APP_CUSTOM_DOMAIN>` → create the production owner account →
+   `nexarionsky.com` → verify step confirms the domain.
+7. Open `https://nexarionsky.com` → create the production owner account →
    set up the organization. Production is live.
 
 ## 7. Operating rules

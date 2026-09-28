@@ -4,7 +4,10 @@
 
 export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[]
 
-export interface Organization {
+// Row types are `type` aliases (not interfaces): supabase-js requires rows to
+// extend Record<string, unknown>, and interfaces lack the implicit index
+// signature that makes that assignability check pass.
+export type Organization = {
   id: string
   slug: string
   name: string
@@ -15,7 +18,7 @@ export interface Organization {
   updated_at: string
 }
 
-export interface Branch {
+export type Branch = {
   id: string
   organization_id: string
   code: string
@@ -28,7 +31,7 @@ export interface Branch {
   updated_at: string
 }
 
-export interface Profile {
+export type Profile = {
   id: string
   organization_id: string | null
   full_name: string
@@ -39,7 +42,7 @@ export interface Profile {
   updated_at: string
 }
 
-export interface AuditLogEntry {
+export type AuditLogEntry = {
   id: number
   organization_id: string | null
   branch_id: string | null
@@ -69,21 +72,25 @@ export interface Database {
         Row: Organization
         Insert: Omit<Organization, 'id' | 'created_at' | 'updated_at'> & { id?: string }
         Update: Partial<Omit<Organization, 'id'>>
+        Relationships: []
       }
       branches: {
         Row: Branch
         Insert: Omit<Branch, 'id' | 'created_at' | 'updated_at'> & { id?: string }
         Update: Partial<Omit<Branch, 'id' | 'organization_id'>>
+        Relationships: []
       }
       profiles: {
         Row: Profile
         Insert: Omit<Profile, 'created_at' | 'updated_at'>
         Update: Partial<Omit<Profile, 'id'>>
+        Relationships: []
       }
       audit_log: {
         Row: AuditLogEntry
         Insert: never
         Update: never
+        Relationships: []
       }
     }
     Views: Record<string, never>
