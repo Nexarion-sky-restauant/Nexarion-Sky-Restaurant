@@ -1,0 +1,30 @@
+name: Apply migrations to Development
+
+# Promotion path: migrations are applied to the DEV project first (from any
+# branch, on demand), then ride develop → staging and main → production with
+# the deploy workflows. Production is never migrated directly from a branch.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  migrate:
+    name: supabase db push → development
+    runs-on: ubuntu-latest
+    environment: development
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Link development project
+        run: supabase link --project-ref "$SUPABASE_PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
+
+      - name: Push migrations
+        run: supabase db push

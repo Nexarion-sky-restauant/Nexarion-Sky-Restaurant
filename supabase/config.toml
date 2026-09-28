@@ -1,0 +1,6 @@
+# Supabase CLI configuration.
+# Used by GitHub Actions to apply migrations to each environment's project via
+# `supabase link --project-ref <env ref>` + `supabase db push`.
+# See docs/PROVISIONING.md for the three-project (dev / staging / prod) setup.
+
+project_id = "nexarion-sky-restaurant"
