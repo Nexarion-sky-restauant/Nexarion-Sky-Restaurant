@@ -1,0 +1,80 @@
+name: Provision Pages Production Project
+
+# One-time, cloud-only provisioning for the production Cloudflare Pages
+# project (docs/PROVISIONING.md §4): creates 'nexarion-sky' as a Direct
+# Upload project — no Git connection, no local command, no file upload —
+# with production branch 'main', via the Cloudflare API using the existing
+# repository secrets. Idempotent: skips creation when the project already
+# exists. Never deploys application files, never touches Supabase, never
+# touches PRODUCTION_ENABLED or the production deploy workflow.
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: provision-pages-production
+  cancel-in-progress: false
+
+jobs:
+  provision:
+    name: Create Pages project nexarion-sky (idempotent)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check whether the Pages project already exists
+        id: check
+        run: |
+          HTTP=$(curl -s -o project.json -w "%{http_code}" \
+            "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CLOUDFLARE_ACCOUNT_ID }}/pages/projects/nexarion-sky" \
+            -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}")
+          if [ "$HTTP" = "200" ] && [ "$(jq -r '.success' project.json)" = "true" ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Pages project nexarion-sky already exists — creation will be skipped."
+          elif [ "$HTTP" = "404" ]; then
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "Pages project nexarion-sky not found — it will be created."
+          else
+            echo "Unexpected response (HTTP $HTTP) while checking the project:"
+            cat project.json
+            exit 1
+          fi
+
+      - name: Create the Pages project (Direct Upload, production branch main)
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          HTTP=$(curl -s -o create.json -w "%{http_code}" -X POST \
+            "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CLOUDFLARE_ACCOUNT_ID }}/pages/projects" \
+            -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            --data '{"name":"nexarion-sky","production_branch":"main"}')
+          if [ "$HTTP" = "200" ] && [ "$(jq -r '.success' create.json)" = "true" ]; then
+            echo "Created Cloudflare Pages project nexarion-sky (Direct Upload, production branch main)."
+            exit 0
+          fi
+          echo "Create returned HTTP $HTTP:"
+          cat create.json
+          # Tolerate a lost race: another run may have created it meanwhile.
+          CHECK=$(curl -s -o race.json -w "%{http_code}" \
+            "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CLOUDFLARE_ACCOUNT_ID }}/pages/projects/nexarion-sky" \
+            -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}")
+          if [ "$CHECK" = "200" ] && [ "$(jq -r '.success' race.json)" = "true" ]; then
+            echo "Project appeared concurrently — treating as already provisioned."
+            exit 0
+          fi
+          exit 1
+
+      - name: Verify the project exists with production branch main
+        run: |
+          HTTP=$(curl -s -o verify.json -w "%{http_code}" \
+            "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CLOUDFLARE_ACCOUNT_ID }}/pages/projects/nexarion-sky" \
+            -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}")
+          if [ "$HTTP" != "200" ]; then
+            echo "Verification failed — project not readable (HTTP $HTTP):"
+            cat verify.json
+            exit 1
+          fi
+          jq -e '.success == true
+                 and .result.name == "nexarion-sky"
+                 and .result.production_branch == "main"' verify.json >/dev/null \
+            || { echo "Verification failed — unexpected project state:"; jq '{success, name: .result.name, production_branch: .result.production_branch}' verify.json; exit 1; }
+          echo "Verified: Cloudflare Pages project 'nexarion-sky' exists with production branch 'main'."
+          jq -r '"name: " + .result.name + " | production_branch: " + .result.production_branch + " | subdomain: " + .result.subdomain + " | created_on: " + .result.created_on' verify.json
