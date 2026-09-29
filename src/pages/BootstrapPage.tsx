@@ -29,7 +29,7 @@ export default function BootstrapPage() {
     setBusy(true)
     setError(null)
 
-    const { error } = await supabase.rpc('bootstrap_organization', {
+    const { error } = await supabase.schema('app').rpc('bootstrap_organization', {
       p_org_name: orgName.trim(),
       p_org_slug: orgSlug.trim().toLowerCase(),
       p_branch_name: branchName.trim(),
