@@ -85,7 +85,7 @@ export default function DashboardPage() {
                 <td>{branch.name}</td>
                 <td>{branch.phone ?? '—'}</td>
                 <td>
-                  <span className={branch.is_active ? 'pill pill-green' : 'pill'}>
+                  <span className={branch.is_active ? 'pill pill-active' : 'pill'}>
                     {branch.is_active ? 'Active' : 'Inactive'}
                   </span>
                 </td>
