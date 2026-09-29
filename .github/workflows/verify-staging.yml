@@ -78,7 +78,9 @@ jobs:
 
       - name: Authentication — GoTrue healthy, rejects bad credentials
         run: |
-          HTTP=$(curl -s -o auth_health.json -w "%{http_code}" "$VITE_SUPABASE_URL/auth/v1/health")
+          HTTP=$(curl -s -o auth_health.json -w "%{http_code}" \
+            -H "apikey: $VITE_SUPABASE_ANON_KEY" \
+            "$VITE_SUPABASE_URL/auth/v1/health")
           [ "$HTTP" = "200" ] || { echo "auth health returned $HTTP"; cat auth_health.json; exit 1; }
           HTTP=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
             -H "apikey: $VITE_SUPABASE_ANON_KEY" \
