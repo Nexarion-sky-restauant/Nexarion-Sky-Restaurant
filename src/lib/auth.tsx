@@ -31,7 +31,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true)
 
   const loadAccess = useCallback(async () => {
-    const { data, error } = await supabase.rpc('get_my_access')
+    const { data, error } = await supabase.schema('app').rpc('get_my_access')
     if (error) {
       // A fresh function deployment can lag; treat as not-yet-bootstrapped.
       setAccess({ profile: null, organization: null, permissions: [], branch_ids: [] })

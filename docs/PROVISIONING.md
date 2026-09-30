@@ -42,7 +42,8 @@ Naming used below — adjust freely, but keep the three projects distinct:
 
 3. Branch protection (Settings → Branches):
    - `main`: require a pull request before merging; require status check
-     **CI / Lint, typecheck and build**; require conversation resolution.
+     **CI** (the check-run name produced by `.github/workflows/ci.yml`);
+     require conversation resolution.
    - `develop`: require the same CI check (PRs into `develop` gate staging).
 
 ## 2. Supabase — three isolated projects

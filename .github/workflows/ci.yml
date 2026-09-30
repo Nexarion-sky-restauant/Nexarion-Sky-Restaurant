@@ -8,7 +8,9 @@ on:
 
 jobs:
   verify:
-    name: Lint, typecheck and build
+    # Job name = check-run name GitHub reports to branch rulesets; the
+    # repository rulesets require a status check named exactly "CI".
+    name: CI
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

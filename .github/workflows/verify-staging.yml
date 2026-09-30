@@ -44,16 +44,21 @@ jobs:
 
       - name: Database — PostgREST up, app schema exposed
         run: |
-          HTTP=$(curl -s -o /dev/null -w "%{http_code}" \
+          # PostgREST root (/) is service_role-only since Supabase's 2025
+          # breaking change, so probe the app schema directly: 401 + code 42501
+          # means PostgREST is up AND schema app is exposed (404/PGRST106 means not).
+          HTTP=$(curl -s -o db_probe.json -w "%{http_code}" \
             -H "apikey: $VITE_SUPABASE_ANON_KEY" \
             -H "Authorization: Bearer $VITE_SUPABASE_ANON_KEY" \
-            "$VITE_SUPABASE_URL/rest/v1/")
-          [ "$HTTP" = "200" ] || { echo "PostgREST root returned $HTTP (expected 200)"; exit 1; }
+            -H "Accept-Profile: app" \
+            "$VITE_SUPABASE_URL/rest/v1/organizations?select=id&limit=1")
+          [ "$HTTP" = "401" ] || { echo "app schema probe returned $HTTP (expected 401 — PostgREST up, schema app exposed)"; cat db_probe.json; exit 1; }
           # RPC route must exist (401 = exposed but auth-required; 404 = schema/function not exposed)
           HTTP=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
             -H "apikey: $VITE_SUPABASE_ANON_KEY" \
             -H "Authorization: Bearer $VITE_SUPABASE_ANON_KEY" \
             -H "Content-Type: application/json" \
+            -H "Content-Profile: app" \
             -d '{}' \
             "$VITE_SUPABASE_URL/rest/v1/rpc/get_my_access")
           [ "$HTTP" = "401" ] || { echo "rpc/get_my_access returned $HTTP (expected 401 for anon; 404 means schema app is not exposed)"; exit 1; }
@@ -65,14 +70,17 @@ jobs:
             HTTP=$(curl -s -o /dev/null -w "%{http_code}" \
               -H "apikey: $VITE_SUPABASE_ANON_KEY" \
               -H "Authorization: Bearer $VITE_SUPABASE_ANON_KEY" \
-              "$VITE_SUPABASE_URL/rest/v1/app/$T?select=*&limit=1")
+              -H "Accept-Profile: app" \
+              "$VITE_SUPABASE_URL/rest/v1/$T?select=*&limit=1")
             [ "$HTTP" = "401" ] || { echo "app.$T returned $HTTP for anon (expected 401 — RLS not blocking)"; exit 1; }
           done
           echo "RLS blocks anon reads on all app tables."
 
       - name: Authentication — GoTrue healthy, rejects bad credentials
         run: |
-          HTTP=$(curl -s -o auth_health.json -w "%{http_code}" "$VITE_SUPABASE_URL/auth/v1/health")
+          HTTP=$(curl -s -o auth_health.json -w "%{http_code}" \
+            -H "apikey: $VITE_SUPABASE_ANON_KEY" \
+            "$VITE_SUPABASE_URL/auth/v1/health")
           [ "$HTTP" = "200" ] || { echo "auth health returned $HTTP"; cat auth_health.json; exit 1; }
           HTTP=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
             -H "apikey: $VITE_SUPABASE_ANON_KEY" \
