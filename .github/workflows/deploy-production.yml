@@ -47,6 +47,10 @@ jobs:
     if: vars.PRODUCTION_ENABLED == 'true'
     runs-on: ubuntu-latest
     environment: production
+    outputs:
+      # verify-domain deliberately has no `environment:`, so it cannot read the
+      # environment-scoped CLOUDFLARE_PAGES_PROJECT variable itself.
+      pages_project: ${{ vars.CLOUDFLARE_PAGES_PROJECT }}
     env:
       VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
       VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
@@ -83,22 +87,32 @@ jobs:
             --data '{"name":"${{ vars.APP_CUSTOM_DOMAIN }}"}')
           # 200 = attached now; 409/8000018 = already attached. Anything else fails.
           if [ "$HTTP" != "200" ]; then
-            if ! grep -q '8000018' attach.json; then
+            # Match the documented error code, not a substring anywhere in the body.
+            if ! jq -e 'any(.errors[]?; .code == 8000018)' attach.json >/dev/null 2>&1; then
               echo "Failed to attach custom domain (HTTP $HTTP):"; cat attach.json; exit 1
             fi
             echo "Custom domain already attached."
           fi
 
-      - name: Verify custom domain is live
-        run: |
-          for i in 1 2 3; do
-            curl -s \
-              "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CLOUDFLARE_ACCOUNT_ID }}/pages/projects/${{ vars.CLOUDFLARE_PAGES_PROJECT }}/domains" \
-              -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}" > domains.json
-            if grep -q '"name":"${{ vars.APP_CUSTOM_DOMAIN }}"' domains.json; then
-              echo "Verified: ${{ vars.APP_CUSTOM_DOMAIN }} is attached to the production deployment."
-              exit 0
-            fi
-            sleep 15
-          done
-          echo "Custom domain not found after retries:"; cat domains.json; exit 1
+  verify-domain:
+    name: Verify production custom domain
+    needs: build-deploy
+    if: vars.PRODUCTION_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    # Deliberately no `environment: production`. This job only reads, and the
+    # production environment requires a manual reviewer, so declaring it here
+    # would add a third approval gate to every deploy. Keeping verification in
+    # its own job means a pending Cloudflare certificate fails only this job:
+    # re-running it never repeats `supabase db push` and never re-uploads the
+    # build. The 'Verify Production Domain' workflow re-checks the domain later
+    # with no deploy run at all.
+    env:
+      DOMAIN: ${{ vars.APP_CUSTOM_DOMAIN }}
+      PROJECT: ${{ needs.build-deploy.outputs.pages_project }}
+      CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify the custom domain is active and serving this deployment
+        run: bash scripts/verify-production-domain.sh
