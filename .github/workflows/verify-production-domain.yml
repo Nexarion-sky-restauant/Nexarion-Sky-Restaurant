@@ -21,13 +21,6 @@ name: Verify Production Domain
 
 on:
   workflow_dispatch:
-  # TEMPORARY registration trigger. A dispatch-only workflow cannot be dispatched
-  # until Actions has registered it, and registration needs one run or presence
-  # on the default branch. The job guard below makes this push a skipped no-op;
-  # remove this trigger once the workflow has been dispatched successfully.
-  push:
-    branches:
-      - fix/verify-production-domain
 
 concurrency:
   group: verify-production-domain
@@ -37,7 +30,6 @@ jobs:
   verify:
     name: Verify production custom domain
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch'
     env:
       DOMAIN: ${{ vars.APP_CUSTOM_DOMAIN }}
       # CLOUDFLARE_PAGES_PROJECT is an environment-scoped variable, so it is not
