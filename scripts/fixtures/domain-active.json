@@ -1,0 +1,19 @@
+{
+  "result": {
+    "name": "nexarionsky.com",
+    "zone_tag": "00000000000000000000000000000000",
+    "status": "active",
+    "verification_data": {
+      "status": "active",
+      "error_message": ""
+    },
+    "validation_data": {
+      "status": "valid"
+    },
+    "certificate_authority": "google",
+    "created_on": "2026-09-30T16:41:17.119288Z"
+  },
+  "success": true,
+  "errors": [],
+  "messages": []
+}

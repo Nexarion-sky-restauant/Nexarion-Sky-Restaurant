@@ -15,6 +15,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Offline assertions for scripts/verify-production-domain.sh, which is only
+      # exercised live during a production deploy. Needs bash + jq, both present on
+      # ubuntu-latest. Runs first so a broken check fails fast, before npm install.
+      - name: Domain verification self-tests
+        run: bash scripts/verify-production-domain.selftest.sh
+
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
