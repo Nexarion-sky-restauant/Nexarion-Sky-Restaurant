@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type { ReactNode } from 'react'
 import { Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../lib/auth'
@@ -12,6 +13,43 @@ export function FullScreenLoading({ label = 'Loading Nexarion Sky…' }: { label
   )
 }
 
+/** Shown when the access lookup fails — a retry, not a /bootstrap bounce (M7). */
+export function AccessErrorScreen({ message, onRetry }: { message: string; onRetry: () => Promise<void> }) {
+  const [retrying, setRetrying] = useState(false)
+
+  const handleRetry = async () => {
+    setRetrying(true)
+    try {
+      await onRetry()
+    } finally {
+      setRetrying(false)
+    }
+  }
+
+  return (
+    <div className="auth-screen">
+      <div className="auth-card">
+        <div className="auth-brand">
+          <div>
+            <div className="brand-name">NEXARION SKY</div>
+            <div className="brand-sub">Restaurant ERP</div>
+          </div>
+        </div>
+        <h1>We couldn&apos;t load your access</h1>
+        <div className="alert alert-error" role="alert">{message}</div>
+        <button
+          type="button"
+          className="btn btn-primary"
+          disabled={retrying}
+          onClick={() => void handleRetry()}
+        >
+          {retrying ? 'Retrying…' : 'Try again'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 /** Requires a signed-in user; redirects to /login otherwise. */
 export function RequireAuth({ children }: { children: ReactNode }) {
   const { session, loading } = useAuth()
@@ -22,11 +60,15 @@ export function RequireAuth({ children }: { children: ReactNode }) {
   return <>{children}</>
 }
 
-/** Requires an organization membership; sends fresh users to /bootstrap. */
+/** Requires an organization membership; sends fresh users to /bootstrap.
+ *  An access-load failure shows the retry screen instead of bouncing (M7). */
 export function RequireOrganization({ children }: { children: ReactNode }) {
-  const { access, loading } = useAuth()
+  const { access, accessError, loading, refreshAccess } = useAuth()
   if (loading) return <FullScreenLoading />
-  if (!access?.organization) return <Navigate to="/bootstrap" replace />
+  if (!access?.organization) {
+    if (accessError) return <AccessErrorScreen message={accessError} onRetry={refreshAccess} />
+    return <Navigate to="/bootstrap" replace />
+  }
   return <>{children}</>
 }
 

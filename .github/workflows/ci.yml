@@ -28,9 +28,16 @@ jobs:
 
       - run: npm ci
 
+      # Fail on high/critical vulnerabilities in production dependencies.
+      # Dev-only findings are handled through Dependabot PRs.
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
       - run: npm run lint
 
       - run: npm run typecheck
+
+      - run: npm run test
 
       # Build with placeholder env so Vite can resolve the variables; the
       # real per-environment values are injected by the deploy workflows.
