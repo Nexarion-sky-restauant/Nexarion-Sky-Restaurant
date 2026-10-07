@@ -39,7 +39,7 @@ jobs:
       CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Verify the custom domain is active and serving the production build
         run: bash scripts/verify-production-domain.sh

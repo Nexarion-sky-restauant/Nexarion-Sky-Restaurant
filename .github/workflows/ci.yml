@@ -13,7 +13,7 @@ jobs:
     name: CI
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Offline assertions for scripts/verify-production-domain.sh, which is only
       # exercised live during a production deploy. Needs bash + jq, both present on
