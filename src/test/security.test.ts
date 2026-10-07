@@ -76,6 +76,7 @@ describe('migration inventory', () => {
         '20260928000003_audit_access_bootstrap.sql',
         '20260929000001_bootstrap_attach_guard_fix.sql',
         '20261008000001_audit_integrity_hardening.sql',
+        '20261008000002_menu_management.sql',
       ]),
     )
   })
@@ -270,6 +271,193 @@ describe('audit integrity hardening (static)', () => {
   })
 })
 
+describe('menu management migration (static)', () => {
+  const MENU_SQL = readFileSync(
+    join(MIGRATIONS_DIR, '20261008000002_menu_management.sql'),
+    'utf8',
+  )
+  const MENU_FLAT = MENU_SQL.replace(/\s+/g, ' ')
+
+  it('creates both menu tables with row level security enabled', () => {
+    const created = [...MENU_SQL.matchAll(/create table\s+app\.(\w+)/gi)].map((m) => m[1])
+    expect(created).toEqual(['menu_categories', 'menu_items'])
+    const enabled = new Set(
+      [...MENU_SQL.matchAll(/alter table\s+app\.(\w+)\s+enable row level security/gi)].map(
+        (m) => m[1],
+      ),
+    )
+    for (const table of created) {
+      expect(enabled.has(table), `RLS is not enabled on app.${table}`).toBe(true)
+    }
+  })
+
+  it('exposes no delete surface on the menu tables or the storage bucket', () => {
+    const grants = [...MENU_SQL.matchAll(/grant\s[^;]+;/gi)].map((m) => m[0])
+    expect(grants.length).toBeGreaterThanOrEqual(3)
+    for (const statement of grants) {
+      expect(statement).not.toMatch(/\b(delete|truncate)\b/i)
+    }
+
+    const policies = [...MENU_SQL.matchAll(/create policy\s+\w+[\s\S]*?;/gi)].map((m) => m[0])
+    expect(policies).toHaveLength(9)
+    for (const statement of policies) {
+      expect(statement).not.toMatch(/\bfor\s+delete\b/i)
+    }
+  })
+
+  it('scopes table policies per command: members read, menu.manage writes', () => {
+    const tablePolicies = [
+      ...MENU_SQL.matchAll(
+        /create policy\s+(\w+)\s+on\s+app\.(menu_categories|menu_items)\s+for\s+(\w+)([\s\S]*?);/gi,
+      ),
+    ].map((m) => ({ name: m[1], command: m[3].toLowerCase(), body: m[4] }))
+
+    expect(tablePolicies).toHaveLength(6)
+    expect(tablePolicies.map((policy) => policy.command).sort()).toEqual([
+      'insert',
+      'insert',
+      'select',
+      'select',
+      'update',
+      'update',
+    ])
+    for (const policy of tablePolicies) {
+      expect(policy.body, `policy ${policy.name} must target authenticated`).toMatch(
+        /\bto authenticated\b/,
+      )
+      expect(policy.body).toContain('app.is_org_member(organization_id)')
+      if (policy.command === 'select') {
+        expect(policy.body).not.toContain('user_has_permission')
+      } else {
+        expect(policy.body).toContain("app.user_has_permission('menu.manage')")
+      }
+    }
+
+    // UPDATE policies carry both USING and WITH CHECK, so a row can neither be
+    // read-into nor written-from another organization.
+    const updatePolicies = tablePolicies.filter((policy) => policy.command === 'update')
+    expect(updatePolicies).toHaveLength(2)
+    for (const policy of updatePolicies) {
+      expect(policy.body.match(/app\.is_org_member\(organization_id\)/g)).toHaveLength(2)
+      expect(policy.body.match(/app\.user_has_permission\('menu\.manage'\)/g)).toHaveLength(2)
+    }
+  })
+
+  it('structurally pins items to their own organization and unique active names', () => {
+    expect(MENU_FLAT).toContain(
+      'constraint menu_categories_id_org_key unique (id, organization_id)',
+    )
+    expect(MENU_FLAT).toContain(
+      'foreign key (category_id, organization_id) references app.menu_categories (id, organization_id) on delete restrict',
+    )
+    expect(MENU_FLAT).toContain(
+      'create unique index menu_categories_org_name_active_idx on app.menu_categories (organization_id, lower(btrim(name))) where is_active;',
+    )
+  })
+
+  it('bounds names, descriptions, prices and image paths at the column level', () => {
+    expect(MENU_FLAT).toContain(
+      'constraint menu_categories_name_length check (char_length(btrim(name)) between 1 and 120)',
+    )
+    expect(MENU_FLAT).toContain(
+      'constraint menu_items_name_length check (char_length(btrim(name)) between 1 and 120)',
+    )
+    expect(MENU_FLAT).toContain('constraint menu_items_price_positive check (price > 0)')
+    expect(MENU_FLAT).toContain(
+      'constraint menu_items_image_path_length check (image_path is null or char_length(image_path) <= 400)',
+    )
+  })
+
+  it('audits menu create and update rows through the generic trigger helper', () => {
+    const declarations = [
+      ...MENU_SQL.matchAll(
+        /create or replace function\s+app\.audit_row_change\s*\([\s\S]*?\bas\s+\$\$/gi,
+      ),
+    ]
+    expect(declarations).toHaveLength(1)
+    expect(declarations[0][0]).toMatch(/security definer/i)
+    expect(declarations[0][0]).toContain("set search_path = ''")
+
+    expect(MENU_FLAT).toContain("v_action := 'create';")
+    expect(MENU_FLAT).toContain("v_action := 'update';")
+    expect(MENU_FLAT).toContain("v_action := 'delete';")
+    expect(MENU_FLAT).toContain('perform app.log_audit(')
+    expect(MENU_FLAT).toContain('to_jsonb(old)')
+    expect(MENU_FLAT).toContain('to_jsonb(new)')
+    expect(MENU_FLAT).toContain('coalesce(tg_argv[0], tg_table_name)')
+  })
+
+  it('wires exactly two audit triggers and two updated_at triggers', () => {
+    const triggers = [...MENU_SQL.matchAll(/create trigger\s+\w+[\s\S]*?;/gi)].map((m) =>
+      m[0].replace(/\s+/g, ' ').trim(),
+    )
+    expect(triggers).toHaveLength(4)
+
+    const auditTriggers = triggers.filter((statement) => statement.includes('audit_row_change'))
+    expect(auditTriggers).toEqual([
+      "create trigger menu_categories_audit_change after insert or update on app.menu_categories for each row execute function app.audit_row_change('menu.category');",
+      "create trigger menu_items_audit_change after insert or update on app.menu_items for each row execute function app.audit_row_change('menu.item');",
+    ])
+    for (const statement of auditTriggers) {
+      expect(statement).not.toMatch(/\bdelete\b/)
+    }
+
+    const updatedAtTriggers = triggers.filter((statement) => statement.includes('set_updated_at'))
+    expect(updatedAtTriggers).toHaveLength(2)
+    for (const statement of updatedAtTriggers) {
+      expect(statement).toMatch(/before update on app\.(menu_categories|menu_items)/)
+    }
+  })
+
+  it('provisions the private menu-images bucket with size and MIME limits', () => {
+    expect(MENU_FLAT).toContain(
+      "insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types) values ('menu-images', 'menu-images', false, 2097152, array['image/jpeg', 'image/png', 'image/webp']) on conflict (id) do nothing;",
+    )
+  })
+
+  it('scopes storage objects to the owning organization and menu managers', () => {
+    const storagePolicies = [
+      ...MENU_SQL.matchAll(
+        /create policy\s+(\w+)\s+on\s+storage\.objects\s+for\s+(\w+)([\s\S]*?);/gi,
+      ),
+    ].map((m) => ({ name: m[1], command: m[2].toLowerCase(), body: m[3] }))
+
+    expect(storagePolicies.map((policy) => policy.command).sort()).toEqual([
+      'insert',
+      'select',
+      'update',
+    ])
+    for (const policy of storagePolicies) {
+      expect(policy.body, `policy ${policy.name} must target authenticated`).toMatch(
+        /\bto authenticated\b/,
+      )
+      expect(policy.body).toContain("bucket_id = 'menu-images'")
+      expect(policy.body).toContain(
+        'app.is_org_member(((storage.foldername(name))[1])::uuid)',
+      )
+      if (policy.command !== 'select') {
+        expect(policy.body).toContain("app.user_has_permission('menu.manage')")
+      }
+    }
+  })
+
+  it('grants menu access to authenticated and locks the helper away from public', () => {
+    expect(MENU_FLAT).toContain(
+      'grant select, insert, update on app.menu_categories to authenticated;',
+    )
+    expect(MENU_FLAT).toContain(
+      'grant select, insert, update on app.menu_items to authenticated;',
+    )
+    expect(MENU_FLAT).toContain(
+      'revoke execute on function app.audit_row_change() from public;',
+    )
+    expect(MENU_FLAT).toContain(
+      'grant execute on function app.audit_row_change() to authenticated;',
+    )
+    expect(MENU_FLAT).toContain("notify pgrst, 'reload schema cache';")
+  })
+})
+
 describe('permission catalog (static)', () => {
   const DEPARTMENTS = [
     'accounting',
@@ -352,5 +540,19 @@ describe('static security headers (public/_headers)', () => {
     expect(csp).toContain("base-uri 'self'")
     expect(csp).toContain("form-action 'self'")
     expect(csp).toContain("frame-ancestors 'none'")
+  })
+
+  it('allows menu images from self, data URIs and the Supabase hosts only', () => {
+    const imgSrc = csp.match(/img-src\s+([^;]+)/)?.[1] ?? ''
+    expect(imgSrc).toContain("'self'")
+    expect(imgSrc).toContain('data:')
+    for (const host of [
+      'https://kypnwtgbldoaisjmkjin.supabase.co',
+      'https://cxlwrjwzykityppxpqnm.supabase.co',
+      'https://ibbbaowkeexqmzwobhmm.supabase.co',
+    ]) {
+      expect(imgSrc, `CSP img-src must allow ${host}`).toContain(host)
+    }
+    expect(imgSrc).not.toContain('*')
   })
 })
