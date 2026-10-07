@@ -42,6 +42,8 @@ Pages · GitHub Actions.
 | `docs/ARCHITECTURE.md` | System design, environment model, security model |
 | `docs/PROVISIONING.md` | **Step-by-step runbook** to provision GitHub/Cloudflare/Supabase and go live |
 | `docs/DATABASE.md` | Foundation schema and permission catalog reference |
+| `docs/TESTING.md` | Test foundation: suites, conventions, static security invariants |
+| `public/_headers` | Cloudflare Pages security headers (CSP, HSTS, frame-deny, nosniff, referrer policy) |
 
 ## Status
 
@@ -57,8 +59,11 @@ Pages · GitHub Actions.
 npm ci
 npm run lint
 npm run typecheck
+npm test            # Vitest suite — see docs/TESTING.md
 npm run build
 ```
 
-Deployment and database migrations run in GitHub Actions; see
-`docs/PROVISIONING.md` before pushing.
+The `CI` workflow additionally gates on
+`npm audit --omit=dev --audit-level=high`; Dependabot opens weekly npm and
+GitHub Actions dependency-update PRs. Deployment and database migrations run in
+GitHub Actions; see `docs/PROVISIONING.md` before pushing.
