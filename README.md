@@ -2,12 +2,13 @@
 
 **One business → one platform → one central database → multiple departments → controlled access.**
 
-This repository currently contains the **approved Phase 1+2 foundation**: cloud
+This repository contains the **approved Phase 1+2 foundation**: cloud
 deployment architecture, central database schema, authentication, granular
-roles/permissions and the audit core — for the full 16-phase ERP plan (rooms,
-POS, kitchen, inventory, purchasing, accounting, HR/payroll, assets,
-reports/PDF, WhatsApp, M-Pesa, Gemini AI). ERP modules are deliberately **not**
-built yet.
+roles/permissions and the audit core — plus the **first restaurant-management
+module: Menu** (categories, items, prices, images), built on the feature branch
+`feat/phase-1-menu` and awaiting staging acceptance. The remaining ERP modules
+(rooms, POS, kitchen, inventory, purchasing, accounting, HR/payroll, assets,
+reports/PDF, WhatsApp, M-Pesa, Gemini AI) are deliberately **not** built yet.
 
 ## Architecture (cloud-only)
 
@@ -36,8 +37,8 @@ Pages · GitHub Actions.
 
 | Path | Purpose |
 |---|---|
-| `supabase/migrations/` | Foundation schema: organizations, branches, profiles, permission catalog, roles, audit log, RLS, bootstrap RPC |
-| `src/` | ERP shell: auth flows, org bootstrap, permission-gated dashboard + audit pages |
+| `supabase/migrations/` | Foundation schema (organizations, branches, profiles, permission catalog, roles, audit log, RLS, bootstrap RPC) + the menu tables and `menu-images` storage bucket |
+| `src/` | ERP shell: auth flows, org bootstrap, permission-gated dashboard + audit pages, and the menu management module (`src/pages/menu/`, `src/lib/menu.ts`) |
 | `.github/workflows/` | CI, dev migration dispatch, staging deploy, production deploy (+ custom-domain verify) |
 | `docs/ARCHITECTURE.md` | System design, environment model, security model |
 | `docs/PROVISIONING.md` | **Step-by-step runbook** to provision GitHub/Cloudflare/Supabase and go live |
@@ -51,7 +52,8 @@ Pages · GitHub Actions.
 |---|---|
 | 1. Architecture & database | ✅ Foundation schema + migrations |
 | 2. Authentication & permissions | ✅ Supabase Auth, roles, granular permissions, RLS, audit core |
-| 3–16 | ⏳ Not started — each begins only with explicit approval |
+| Menu management (first restaurant module) | 🔄 Implemented on `feat/phase-1-menu` — staging acceptance pending |
+| Remaining roadmap phases | ⏳ Not started — each begins only with explicit approval |
 
 ## Commands (CI parity)
 

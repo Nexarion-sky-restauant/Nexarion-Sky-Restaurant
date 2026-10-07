@@ -1,4 +1,4 @@
-# Database Reference — Foundation (Phase 1+2)
+# Database Reference — Foundation (Phase 1+2) + Menu module
 
 All application tables live in schema **`app`** in the single Supabase
 PostgreSQL database. Migrations live in `supabase/migrations/` and are applied
@@ -58,6 +58,22 @@ Optional branch restriction set. **No rows = access to all org branches.**
 Once any row exists the user is confined to the listed branches (enforced by
 `app.user_can_access_branch`).
 
+### `app.menu_categories`
+Org-wide menu categories (migration `20261008000002`). Names are unique among
+**active** rows per organization (`lower(btrim(name))` partial unique index), so
+a deactivated category's name can be reused. Soft-deleted via `is_active` —
+there is no DELETE grant or policy anywhere. `(id, organization_id)` is unique
+as the composite-FK target for items.
+
+### `app.menu_items`
+Menu items in `numeric(12,2)` prices (> 0, org default currency). A composite
+foreign key `(category_id, organization_id)` pins each item to a category of
+the **same** organization, so cross-org category references are structurally
+impossible. `is_available` is the day-to-day "86" toggle; `is_active` is the
+soft-delete flag. `image_path` points into the private `menu-images` bucket.
+Both menu tables carry the `app.audit_row_change` trigger: every INSERT/UPDATE
+is captured with full before/after JSONB (`menu.category` / `menu.item`).
+
 ### `app.audit_log`
 Append-only (`SELECT`, `INSERT` grants only — no UPDATE/DELETE anywhere).
 Written through `app.log_audit(action, entity_type, entity_id, branch_id,
@@ -81,13 +97,29 @@ Edge Functions in later phases. Read requires `audit.view`.
 | `app.bootstrap_organization(name, slug, branch_name, branch_code)` | first-run: creates org, first branch, the four system roles; caller becomes `owner`. One org per user; writes an audit entry |
 | `app.log_audit(...)` | server-stamped audit writer; validates `branch_id` against the caller's organization |
 | `app.guard_audit_integrity()` | audit insert guard: server-derives actor identity, overwrites client `actor_email`, validates branch/organization consistency |
+| `app.audit_row_change()` | generic AFTER INSERT/UPDATE row-audit trigger: writes full before/after JSONB through `app.log_audit` under the entity type given as the trigger argument (menu tables use `menu.category` / `menu.item`; `branch_id` is null for org-wide entities) |
 | `app.handle_new_user()` | auth trigger → creates profile |
+
+## Storage
+
+Private bucket **`menu-images`** (2 MB cap; `image/jpeg`, `image/png`,
+`image/webp` only). Object paths are `{organization_id}/{uuid}.{ext}`, and the
+three access rules on `storage.objects` mirror table RLS: members select,
+`menu.manage` holders insert/update — all scoped to the folder named after the
+caller's organization. There is deliberately no DELETE rule in v1: replacing an
+image points `image_path` at a new object; the old object becomes unreachable.
+The SPA displays images via short-lived signed URLs (1 hour).
 
 ## RLS summary
 
 Every table has RLS enabled. SELECT is org-membership based (plus permission
 gates where marked); all writes require the relevant manage/permission key and
-org membership; `audit_log` is insert/self or `audit.view`. The `app` schema is
+org membership; `audit_log` is insert/self or `audit.view`. The menu tables are
+the worked example of the full pattern: every member reads, `menu.manage`
+writes, UPDATE policies carry both `using` and `with check`, and neither table
+has a DELETE grant or policy — deactivation is the only removal path. The
+`menu-images` storage rules enforce the same split against the organization
+folder. The `app` schema is
 exposed to PostgREST (`alter role authenticator set pgrst.db_schemas =
 'public, app'`) so the SPA uses `.schema('app')`; the `anon` role has no usage
 of `app` at all — unauthenticated requests get nothing.
@@ -97,7 +129,9 @@ of `app` at all — unauthenticated requests get nothing.
 1. New tables in schema `app`, `organization_id` (and usually `branch_id`)
    FK'd, indexes on the FKs, `enable row level security`, explicit grants,
    policies via the helpers above.
-2. Sensitive mutations call `app.log_audit` with before/after JSON.
+2. Sensitive mutations call `app.log_audit` with before/after JSON; for plain
+   create/update row audits, attach the reusable `app.audit_row_change('<entity.type>')`
+   trigger instead (see the menu tables).
 3. Financial tables follow the reversals-not-edits rule: posted rows are
    immutable; corrections insert compensating rows (detail in the accounting
    phase).

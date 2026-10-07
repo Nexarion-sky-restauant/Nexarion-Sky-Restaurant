@@ -1,9 +1,18 @@
 import type { Session } from '@supabase/supabase-js'
-import type { AccessPayload, Branch, Organization, Profile } from '../types/database'
+import type {
+  AccessPayload,
+  Branch,
+  MenuCategory,
+  MenuItem,
+  Organization,
+  Profile,
+} from '../types/database'
 
 export const TEST_USER_ID = '11111111-1111-4111-8111-111111111111'
 export const TEST_ORG_ID = '22222222-2222-4222-8222-222222222222'
 export const TEST_BRANCH_ID = '33333333-3333-4333-8333-333333333333'
+export const TEST_CATEGORY_ID = '44444444-4444-4444-8444-444444444444'
+export const TEST_ITEM_ID = '55555555-5555-4555-8555-555555555555'
 
 const NOW = '2026-01-01T00:00:00.000Z'
 
@@ -44,6 +53,37 @@ export function makeProfile(overrides: Partial<Profile> = {}): Profile {
     full_name: 'Ada Owner',
     phone: null,
     avatar_path: null,
+    is_active: true,
+    created_at: NOW,
+    updated_at: NOW,
+    ...overrides,
+  }
+}
+
+export function makeMenuCategory(overrides: Partial<MenuCategory> = {}): MenuCategory {
+  return {
+    id: TEST_CATEGORY_ID,
+    organization_id: TEST_ORG_ID,
+    name: 'Starters',
+    description: 'Light dishes to open the meal.',
+    sort_order: 1,
+    is_active: true,
+    created_at: NOW,
+    updated_at: NOW,
+    ...overrides,
+  }
+}
+
+export function makeMenuItem(overrides: Partial<MenuItem> = {}): MenuItem {
+  return {
+    id: TEST_ITEM_ID,
+    organization_id: TEST_ORG_ID,
+    category_id: TEST_CATEGORY_ID,
+    name: 'Truffle Soup',
+    description: 'Creamy wild mushroom soup.',
+    price: 950,
+    image_path: null,
+    is_available: true,
     is_active: true,
     created_at: NOW,
     updated_at: NOW,

@@ -33,7 +33,7 @@
 │  - Auth (sessions, users)                                   │
 │  - PostgREST API, schema `app` exposed                      │
 │  - PostgreSQL with RLS on every table                       │
-│  - Storage (activated in a later phase)                     │
+│  - Storage (private buckets; menu images via signed URLs)   │
 │  - Edge Functions (M-Pesa callbacks, WhatsApp, Gemini:      │
 │    later phases; hold service-role keys server-side only)   │
 └─────────────────────────────────────────────────────────────┘
@@ -77,10 +77,19 @@
   Functions arrive) live exclusively in Supabase Edge Function secrets.
 - **Audit**: `app.audit_log` is append-only — no UPDATE/DELETE grants exist.
   Inserts must be self-attributed (`actor_id = auth.uid()`), and the normal
-  path is the server-stamping `app.log_audit` function.
+  path is the server-stamping `app.log_audit` function. The reusable
+  `app.audit_row_change` trigger captures every menu create/update with full
+  before/after JSONB.
+- **Storage**: buckets are private; rules on `storage.objects` mirror table RLS
+  per organization folder (`{organization_id}/…`). Menu images: members read,
+  `menu.manage` write, no delete in v1 — served to the SPA as short-lived
+  signed URLs.
 
 ## What intentionally does not exist yet
 
-Rooms/bookings/folios, POS, kitchen, inventory, purchasing, accounting, HR,
-payroll, assets, reports/PDF, WhatsApp, M-Pesa, Gemini. Each arrives in its
-approved phase with its own migration set extending this foundation.
+The Menu module (categories, items, prices, images; migration
+`20261008000002` + `src/pages/menu/`) is the first functional module. Rooms/
+bookings/folios, POS, kitchen, inventory, purchasing, accounting, HR, payroll,
+assets, reports/PDF, WhatsApp, M-Pesa, Gemini intentionally do not exist yet.
+Each arrives in its approved phase with its own migration set extending this
+foundation.
