@@ -1,0 +1,49 @@
+name: Production auth disable signup
+
+# Closes open registration on the production Supabase project
+# (disable_signup=true). The owner account already exists; new production
+# users are added by an org owner, not self-serve. Staging is intentionally
+# left open for testing. Mirrors staging-auth-autoconfirm.yml: uses the
+# existing production environment credentials; never prints secrets.
+# Manual dispatch only — deliberate, review-gated (environment: production).
+
+on:
+  workflow_dispatch:
+    inputs:
+      disable_signup:
+        description: 'Production disable_signup (true closes registration)'
+        type: boolean
+        default: true
+
+jobs:
+  set-disable-signup:
+    name: Set production disable_signup
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+      VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+      VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+      WANT_DISABLE_SIGNUP: ${{ inputs.disable_signup }}
+    steps:
+      - name: Apply disable_signup via Management API
+        run: |
+          HTTP=$(curl -s -o cfg.json -w "%{http_code}" \
+            --request PATCH \
+            --url "https://api.supabase.com/v1/projects/$SUPABASE_PROJECT_REF/config/auth" \
+            --header "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            --header "Content-Type: application/json" \
+            --data "{\"disable_signup\": $WANT_DISABLE_SIGNUP}")
+          [ "$HTTP" = "200" ] || { echo "Management API returned $HTTP"; jq '.' cfg.json; exit 1; }
+          echo "Management API OK: $(jq -c '{disable_signup}' cfg.json)"
+
+      - name: Verify via public auth settings
+        run: |
+          HTTP=$(curl -s -o settings.json -w "%{http_code}" \
+            -H "apikey: $VITE_SUPABASE_ANON_KEY" \
+            "$VITE_SUPABASE_URL/auth/v1/settings")
+          [ "$HTTP" = "200" ] || { echo "settings returned $HTTP"; cat settings.json; exit 1; }
+          jq -e --arg want "$WANT_DISABLE_SIGNUP" '.disable_signup == ($want == "true")' settings.json >/dev/null \
+            || { echo "disable_signup mismatch (wanted $WANT_DISABLE_SIGNUP):"; jq '{mailer_autoconfirm, disable_signup}' settings.json; exit 1; }
+          echo "Production disable_signup is now $WANT_DISABLE_SIGNUP."
