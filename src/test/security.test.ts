@@ -75,6 +75,7 @@ describe('migration inventory', () => {
         '20260928000002_permissions_roles_rls.sql',
         '20260928000003_audit_access_bootstrap.sql',
         '20260929000001_bootstrap_attach_guard_fix.sql',
+        '20261008000001_audit_integrity_hardening.sql',
       ]),
     )
   })
@@ -218,6 +219,54 @@ describe('bootstrap RPC preconditions (static)', () => {
     expect(bootstrap).toContain('Authentication required.')
     expect(bootstrap).toContain('already belongs to an organization')
     expect(bootstrap).toContain('is already taken')
+  })
+})
+
+describe('audit integrity hardening (static)', () => {
+  it('validates a non-null audit branch against the caller organization before insert', () => {
+    const fn = lastDeclaration('log_audit').replace(/\s+/g, ' ')
+    expect(fn).toContain('p_branch_id is not null')
+    expect(fn).toContain('b.organization_id = v_org_id')
+    expect(fn).toContain('does not belong to the caller')
+    const validation = fn.indexOf('does not belong to the caller')
+    const insert = fn.indexOf('insert into app.audit_log')
+    expect(validation).toBeGreaterThanOrEqual(0)
+    expect(insert).toBeGreaterThan(validation)
+  })
+
+  it('routes every audit insert through a before-insert integrity trigger', () => {
+    const auditTriggers = [...ALL_SQL.matchAll(/create trigger\s+\w+[\s\S]*?;/gi)]
+      .map((m) => m[0].replace(/\s+/g, ' '))
+      .filter((statement) => statement.includes('on app.audit_log'))
+    expect(auditTriggers).toHaveLength(1)
+    expect(auditTriggers[0]).toMatch(/before insert on app\.audit_log/)
+    expect(auditTriggers[0]).toMatch(/execute function app\.guard_audit_integrity\(\)/)
+  })
+
+  it('server-derives the audit actor so clients cannot spoof attribution', () => {
+    const guard = lastDeclaration('guard_audit_integrity').replace(/\s+/g, ' ')
+    expect(guard).toContain('v_uid uuid := auth.uid()')
+    expect(guard).toContain('if v_uid is not null then')
+    expect(guard).toContain('new.actor_id := v_uid')
+    expect(guard).toContain('select u.email from auth.users u where u.id = v_uid')
+    expect(guard).toContain("auth.jwt() ->> 'email'")
+    // The stored email is assigned exactly once, from server-derived values;
+    // the column is never read back as a fallback, so a client-supplied
+    // actor_email can never survive the trigger.
+    expect(guard.match(/new\.actor_email/g)).toHaveLength(1)
+    expect(guard).toContain('new.actor_email := v_email')
+    expect(guard).not.toContain('coalesce(new.actor_email')
+  })
+
+  it('keeps audit branch/organization consistent and revokes the guard from public', () => {
+    const guard = lastDeclaration('guard_audit_integrity').replace(/\s+/g, ' ')
+    expect(guard).toContain('new.branch_id is not null')
+    expect(guard).toContain('b.organization_id = new.organization_id')
+    expect(guard).toContain('p.organization_id = b.organization_id')
+    expect(guard).toContain('raise exception')
+    expect(ALL_SQL_FLAT).toContain(
+      'revoke execute on function app.guard_audit_integrity() from public;',
+    )
   })
 })
 

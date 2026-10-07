@@ -62,9 +62,13 @@ Once any row exists the user is confined to the listed branches (enforced by
 Append-only (`SELECT`, `INSERT` grants only — no UPDATE/DELETE anywhere).
 Written through `app.log_audit(action, entity_type, entity_id, branch_id,
 before, after, metadata)`, which stamps `organization_id`, `actor_id` and
-`actor_email` from the auth context server-side. Direct INSERT is permitted
-only self-attributed (`actor_id = auth.uid()`), reserved for Edge Functions in
-later phases. Read requires `audit.view`.
+`actor_email` from the auth context server-side and validates a non-null
+`branch_id` against the caller's organization. A before-insert guard
+(`app.guard_audit_integrity`) server-derives `actor_id`/`actor_email` for
+authenticated writers — a client-supplied email is always overwritten — and
+requires `branch_id`/`organization_id` pairs to be consistent. Direct INSERT
+is permitted only self-attributed (`actor_id = auth.uid()`), reserved for
+Edge Functions in later phases. Read requires `audit.view`.
 
 ## Functions (all `security definer`, `set search_path = ''`)
 
@@ -75,7 +79,8 @@ later phases. Read requires `audit.view`.
 | `app.user_can_access_branch(branch)` | branch scoping (restriction rows win) |
 | `app.get_my_access()` | one-round-trip payload for the SPA: profile + organization + permission keys + restricted branch ids |
 | `app.bootstrap_organization(name, slug, branch_name, branch_code)` | first-run: creates org, first branch, the four system roles; caller becomes `owner`. One org per user; writes an audit entry |
-| `app.log_audit(...)` | server-stamped audit writer |
+| `app.log_audit(...)` | server-stamped audit writer; validates `branch_id` against the caller's organization |
+| `app.guard_audit_integrity()` | audit insert guard: server-derives actor identity, overwrites client `actor_email`, validates branch/organization consistency |
 | `app.handle_new_user()` | auth trigger → creates profile |
 
 ## RLS summary

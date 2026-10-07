@@ -52,6 +52,10 @@ security headers regress on:
 
 - RLS enabled on every `app.*` table; every policy targets `authenticated` only
 - `app.audit_log` append-only: select + insert grants, no update/delete
+- audit integrity hardening: `log_audit` rejects a branch outside the caller's
+  organization; a before-insert guard on `app.audit_log` server-derives actor
+  attribution (client `actor_email` is always overwritten, never kept as a
+  fallback) and keeps branch/organization pairs consistent
 - every security-definer function pins `set search_path = ''`
 - the bootstrap GUC guard (`app.bootstrap_org_id`) and the bootstrap RPC
   preconditions (authenticated caller, single organization, unique slug)
@@ -79,6 +83,3 @@ GitHub Actions update PRs, which go through the same gate.
   isolated Supabase project or a pgTAP harness. Both are deferred pending
   explicit approval — until then those behaviours were verified manually on
   staging during Phase 2 and are re-verified per deploy.
-- **Audit-integrity hardening** (`log_audit` validating `branch_id` against
-  the actor's organization, tight `actor_email` insert check) is a proposed
-  migration, deferred pending approval.
