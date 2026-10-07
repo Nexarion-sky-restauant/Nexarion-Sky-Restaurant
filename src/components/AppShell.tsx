@@ -6,11 +6,12 @@ interface NavItem {
   to: string
   label: string
   icon: string
-  permission: string
+  permission?: string
 }
 
 const NAV_ITEMS: NavItem[] = [
   { to: '/', label: 'Dashboard', icon: '▦', permission: 'dashboard.view' },
+  { to: '/menu', label: 'Menu', icon: '✦' },
   { to: '/audit', label: 'Audit Log', icon: '≣', permission: 'audit.view' },
 ]
 
@@ -25,7 +26,7 @@ export default function AppShell() {
   const navigate = useNavigate()
   const env = ENV_BADGE[appEnv()] ?? ENV_BADGE.development
 
-  const visibleNav = NAV_ITEMS.filter((item) => hasPermission(item.permission))
+  const visibleNav = NAV_ITEMS.filter((item) => !item.permission || hasPermission(item.permission))
 
   const handleSignOut = async () => {
     await signOut()
@@ -54,8 +55,9 @@ export default function AppShell() {
 
         <div className="sidebar-note">
           <div className="sidebar-note-title">Foundation</div>
-          Phases 1–2 of 16 are live. Rooms, POS, inventory, accounting and the
-          remaining departments activate in their approved phases.
+          Foundation phases 1–2 are complete and the Menu module is live. Rooms,
+          POS, inventory, accounting and the remaining departments activate in
+          their approved phases.
         </div>
       </aside>
 

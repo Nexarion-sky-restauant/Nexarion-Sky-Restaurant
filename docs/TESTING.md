@@ -27,6 +27,8 @@ that does and does not cover).
 | `src/test/LoginPage.test.tsx` | Sign-in / sign-up / reset flows, hidden sign-up when the server disables it |
 | `src/test/BootstrapPage.test.tsx` | First-run bootstrap form: prefill, input normalization, RPC call, error handling |
 | `src/test/ErrorBoundary.test.tsx` | Global error boundary fallback |
+| `src/test/menuValidation.test.ts` | Menu validation rules: price parsing/bounds, name/description limits, image type & size, currency formatting |
+| `src/test/MenuPage.test.tsx` | Menu page (manager/staff views): read-only gating, availability toggle + failure alert, inactive filter, category/item editors, image upload → signed URL render |
 | `src/test/security.test.ts` | Static invariants over the SQL migrations and `public/_headers` |
 | `src/test/fixtures.ts` | Deterministic IDs and payload factories |
 | `src/test/authMock.ts` | Full `useAuth` context mock factory |
@@ -63,9 +65,17 @@ security headers regress on:
   functions executable by `authenticated`
 - permission catalog: 58 unique keys in `<department>.<action>` form, and every
   permission key referenced by the UI exists in the catalog
+- menu migration (`20261008000002`): both tables RLS-enabled; **no delete
+  surface** (no delete/truncate grants, no delete policies); members read,
+  `menu.manage` writes; UPDATE policies carry both `using` and `with check`;
+  composite FK pins items to a same-organization category; active-name unique
+  index; column-level bounds (price > 0, name/description/image-path lengths);
+  audit triggers on create/update; private `menu-images` bucket (2 MB,
+  JPEG/PNG/WebP) with org-folder-scoped storage rules
 - no service-role references anywhere in the frontend
 - `public/_headers`: CSP (self + Google Fonts + the three Supabase origins,
-  no `unsafe-inline`/`unsafe-eval`), HSTS, `X-Frame-Options: DENY`,
+  no `unsafe-inline`/`unsafe-eval`; `img-src` additionally allows the Supabase
+  hosts for signed menu-image URLs), HSTS, `X-Frame-Options: DENY`,
   `X-Content-Type-Options: nosniff`, `Referrer-Policy`
 
 ## CI integration

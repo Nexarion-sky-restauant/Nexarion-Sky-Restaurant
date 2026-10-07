@@ -6,6 +6,7 @@ import AppShell from './components/AppShell'
 import LoginPage from './pages/LoginPage'
 import BootstrapPage from './pages/BootstrapPage'
 import DashboardPage from './pages/DashboardPage'
+import MenuListPage from './pages/menu/MenuListPage'
 import AuditPage from './pages/AuditPage'
 import UnauthorizedPage from './pages/UnauthorizedPage'
 
@@ -44,6 +45,7 @@ export default function App() {
                   </RequirePermission>
                 }
               />
+              <Route path="menu" element={<MenuListPage />} />
               <Route
                 path="audit"
                 element={

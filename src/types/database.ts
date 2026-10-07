@@ -58,6 +58,31 @@ export type AuditLogEntry = {
   created_at: string
 }
 
+export type MenuCategory = {
+  id: string
+  organization_id: string
+  name: string
+  description: string
+  sort_order: number
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+export type MenuItem = {
+  id: string
+  organization_id: string
+  category_id: string
+  name: string
+  description: string
+  price: number
+  image_path: string | null
+  is_available: boolean
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
 export interface AccessPayload {
   profile: Profile | null
   organization: Organization | null
@@ -90,6 +115,18 @@ export interface Database {
         Row: AuditLogEntry
         Insert: never
         Update: never
+        Relationships: []
+      }
+      menu_categories: {
+        Row: MenuCategory
+        Insert: Omit<MenuCategory, 'id' | 'created_at' | 'updated_at'> & { id?: string }
+        Update: Partial<Omit<MenuCategory, 'id' | 'organization_id'>>
+        Relationships: []
+      }
+      menu_items: {
+        Row: MenuItem
+        Insert: Omit<MenuItem, 'id' | 'created_at' | 'updated_at'> & { id?: string }
+        Update: Partial<Omit<MenuItem, 'id' | 'organization_id'>>
         Relationships: []
       }
     }
