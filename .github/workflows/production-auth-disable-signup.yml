@@ -38,12 +38,23 @@ jobs:
           [ "$HTTP" = "200" ] || { echo "Management API returned $HTTP"; jq '.' cfg.json; exit 1; }
           echo "Management API OK: $(jq -c '{disable_signup}' cfg.json)"
 
-      - name: Verify via public auth settings
+      # The Management API PATCH is effective immediately, but the public
+      # /auth/v1/settings endpoint can lag behind it by seconds. Retry so a
+      # successful change is not reported as a failure.
+      - name: Verify via public auth settings (propagation-aware)
         run: |
-          HTTP=$(curl -s -o settings.json -w "%{http_code}" \
-            -H "apikey: $VITE_SUPABASE_ANON_KEY" \
-            "$VITE_SUPABASE_URL/auth/v1/settings")
-          [ "$HTTP" = "200" ] || { echo "settings returned $HTTP"; cat settings.json; exit 1; }
-          jq -e --arg want "$WANT_DISABLE_SIGNUP" '.disable_signup == ($want == "true")' settings.json >/dev/null \
-            || { echo "disable_signup mismatch (wanted $WANT_DISABLE_SIGNUP):"; jq '{mailer_autoconfirm, disable_signup}' settings.json; exit 1; }
-          echo "Production disable_signup is now $WANT_DISABLE_SIGNUP."
+          for attempt in $(seq 1 12); do
+            HTTP=$(curl -s -o settings.json -w "%{http_code}" \
+              -H "apikey: $VITE_SUPABASE_ANON_KEY" \
+              "$VITE_SUPABASE_URL/auth/v1/settings")
+            if [ "$HTTP" = "200" ] && jq -e --arg want "$WANT_DISABLE_SIGNUP" \
+                 '.disable_signup == ($want == "true")' settings.json >/dev/null 2>&1; then
+              echo "Public settings reflect disable_signup=$WANT_DISABLE_SIGNUP (attempt $attempt)."
+              exit 0
+            fi
+            echo "Attempt $attempt/12: not yet reflected (HTTP $HTTP) — retrying in 5s."
+            sleep 5
+          done
+          echo "disable_signup did not reach $WANT_DISABLE_SIGNUP within 60s:"
+          jq '{mailer_autoconfirm, disable_signup}' settings.json || cat settings.json
+          exit 1
