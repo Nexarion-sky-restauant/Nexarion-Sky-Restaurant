@@ -208,7 +208,7 @@ alter table app.user_branches enable row level security;
 
 -- Catalog is reference data: any signed-in user may read it (keys are not secret).
 create policy permissions_select_authenticated
-  on app.permissions for select to anon
+  on app.permissions for select to authenticated
   using (true);
 
 -- roles: org members read their org's roles; roles.manage for writes.
