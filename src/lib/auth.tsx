@@ -11,6 +11,8 @@ interface AuthContextValue {
   loading: boolean
   /** Null when the signed-in user has not joined an organization yet. */
   access: AccessPayload | null
+  /** Set when the last access load failed; distinguishes an RPC error from "no organization". */
+  accessError: string | null
   /** False when the server's auth config disables sign-up (production). */
   signUpEnabled: boolean
   hasPermission: (key: string) => boolean
@@ -31,6 +33,7 @@ function friendlyError(message: string): string {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null)
   const [access, setAccess] = useState<AccessPayload | null>(null)
+  const [accessError, setAccessError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   // Fail open: the server rejects sign-up when disabled, so a failed probe
   // must not lock the UI into hiding a path the deployment actually offers.
@@ -39,10 +42,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const loadAccess = useCallback(async () => {
     const { data, error } = await supabase.schema('app').rpc('get_my_access')
     if (error) {
-      // A fresh function deployment can lag; treat as not-yet-bootstrapped.
-      setAccess({ profile: null, organization: null, permissions: [], branch_ids: [] })
+      // A transport/RPC failure is not "not yet bootstrapped" — surface it so
+      // the UI can offer a retry instead of bouncing the user to /bootstrap.
+      setAccessError(friendlyError(error.message))
       return
     }
+    setAccessError(null)
     const payload = data as unknown as AccessPayload
     setAccess(payload.profile ? payload : null)
   }, [])
@@ -77,6 +82,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         void loadAccess()
       } else {
         setAccess(null)
+        setAccessError(null)
       }
     })
 
@@ -91,6 +97,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       session,
       loading,
       access,
+      accessError,
       signUpEnabled,
       hasPermission: (key) => access?.permissions.includes(key) ?? false,
       refreshAccess: loadAccess,
@@ -116,7 +123,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await supabase.auth.signOut()
       },
     }),
-    [session, loading, access, signUpEnabled, loadAccess],
+    [session, loading, access, accessError, signUpEnabled, loadAccess],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

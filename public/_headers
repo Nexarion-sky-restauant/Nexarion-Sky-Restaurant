@@ -1,0 +1,12 @@
+# Cloudflare Pages response headers — Phase 0B (M2).
+# Strict CSP: the bundle is self-hosted, Google Fonts is the only third-party
+# asset origin, and the only network endpoints are this origin plus the three
+# Supabase project APIs (dev / staging / prod).
+# When Realtime is introduced, add wss://<project-ref>.supabase.co to
+# connect-src, otherwise websocket connections will be blocked.
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://kypnwtgbldoaisjmkjin.supabase.co https://cxlwrjwzykityppxpqnm.supabase.co https://ibbbaowkeexqmzwobhmm.supabase.co; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
+  Strict-Transport-Security: max-age=31536000; includeSubDomains
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin

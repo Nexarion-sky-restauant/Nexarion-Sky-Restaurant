@@ -1,5 +1,6 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { AuthProvider } from './lib/auth'
+import ErrorBoundary from './components/ErrorBoundary'
 import { RequireAuth, RequireOrganization, RequirePermission } from './components/guards'
 import AppShell from './components/AppShell'
 import LoginPage from './pages/LoginPage'
@@ -11,50 +12,52 @@ import UnauthorizedPage from './pages/UnauthorizedPage'
 export default function App() {
   return (
     <BrowserRouter>
-      <AuthProvider>
-        <Routes>
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/unauthorized" element={<UnauthorizedPage />} />
+      <ErrorBoundary>
+        <AuthProvider>
+          <Routes>
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/unauthorized" element={<UnauthorizedPage />} />
 
-          <Route
-            path="/bootstrap"
-            element={
-              <RequireAuth>
-                <BootstrapPage />
-              </RequireAuth>
-            }
-          />
-
-          <Route
-            element={
-              <RequireAuth>
-                <RequireOrganization>
-                  <AppShell />
-                </RequireOrganization>
-              </RequireAuth>
-            }
-          >
             <Route
-              index
+              path="/bootstrap"
               element={
-                <RequirePermission permission="dashboard.view">
-                  <DashboardPage />
-                </RequirePermission>
+                <RequireAuth>
+                  <BootstrapPage />
+                </RequireAuth>
               }
             />
-            <Route
-              path="audit"
-              element={
-                <RequirePermission permission="audit.view">
-                  <AuditPage />
-                </RequirePermission>
-              }
-            />
-          </Route>
 
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </AuthProvider>
+            <Route
+              element={
+                <RequireAuth>
+                  <RequireOrganization>
+                    <AppShell />
+                  </RequireOrganization>
+                </RequireAuth>
+              }
+            >
+              <Route
+                index
+                element={
+                  <RequirePermission permission="dashboard.view">
+                    <DashboardPage />
+                  </RequirePermission>
+                }
+              />
+              <Route
+                path="audit"
+                element={
+                  <RequirePermission permission="audit.view">
+                    <AuditPage />
+                  </RequirePermission>
+                }
+              />
+            </Route>
+
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </AuthProvider>
+      </ErrorBoundary>
     </BrowserRouter>
   )
 }
