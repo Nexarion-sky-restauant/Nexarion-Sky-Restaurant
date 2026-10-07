@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import type { ReactNode } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { supabase } from './supabase'
+import { env } from '../config/env'
 import type { AccessPayload } from '../types/database'
 
 interface AuthContextValue {
@@ -10,6 +11,8 @@ interface AuthContextValue {
   loading: boolean
   /** Null when the signed-in user has not joined an organization yet. */
   access: AccessPayload | null
+  /** False when the server's auth config disables sign-up (production). */
+  signUpEnabled: boolean
   hasPermission: (key: string) => boolean
   refreshAccess: () => Promise<void>
   signInWithPassword: (email: string, password: string) => Promise<{ error: string | null }>
@@ -29,6 +32,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null)
   const [access, setAccess] = useState<AccessPayload | null>(null)
   const [loading, setLoading] = useState(true)
+  // Fail open: the server rejects sign-up when disabled, so a failed probe
+  // must not lock the UI into hiding a path the deployment actually offers.
+  const [signUpEnabled, setSignUpEnabled] = useState(true)
 
   const loadAccess = useCallback(async () => {
     const { data, error } = await supabase.schema('app').rpc('get_my_access')
@@ -54,6 +60,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     })
 
+    // Mirror the server's registration setting so the UI hides sign-up on
+    // deployments where it is disabled (production). Public endpoint.
+    fetch(`${env.supabaseUrl}/auth/v1/settings`, { headers: { apikey: env.supabaseAnonKey } })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((settings: { disable_signup?: boolean } | null) => {
+        if (!cancelled && settings) setSignUpEnabled(settings.disable_signup !== true)
+      })
+      .catch(() => {})
+
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, nextSession) => {
@@ -76,6 +91,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       session,
       loading,
       access,
+      signUpEnabled,
       hasPermission: (key) => access?.permissions.includes(key) ?? false,
       refreshAccess: loadAccess,
       signInWithPassword: async (email, password) => {
@@ -100,7 +116,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await supabase.auth.signOut()
       },
     }),
-    [session, loading, access, loadAccess],
+    [session, loading, access, signUpEnabled, loadAccess],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
