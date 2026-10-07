@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../lib/auth'
@@ -7,7 +7,7 @@ import { FullScreenLoading } from '../components/guards'
 type Mode = 'signin' | 'signup' | 'reset'
 
 export default function LoginPage() {
-  const { session, loading, signInWithPassword, signUp, sendPasswordReset } = useAuth()
+  const { session, loading, signUpEnabled, signInWithPassword, signUp, sendPasswordReset } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
   const from = (location.state as { from?: string } | null)?.from ?? '/'
@@ -19,6 +19,10 @@ export default function LoginPage() {
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!signUpEnabled && mode === 'signup') setMode('signin')
+  }, [signUpEnabled, mode])
 
   if (loading) return <FullScreenLoading />
   if (session) return <Navigate to={from} replace />
@@ -60,14 +64,16 @@ export default function LoginPage() {
           </div>
         </div>
 
-        <div className="auth-tabs">
-          <button type="button" className={mode === 'signin' ? 'active' : ''} onClick={() => setMode('signin')}>
-            Sign in
-          </button>
-          <button type="button" className={mode === 'signup' ? 'active' : ''} onClick={() => setMode('signup')}>
-            Create account
-          </button>
-        </div>
+        {signUpEnabled && (
+          <div className="auth-tabs">
+            <button type="button" className={mode === 'signin' ? 'active' : ''} onClick={() => setMode('signin')}>
+              Sign in
+            </button>
+            <button type="button" className={mode === 'signup' ? 'active' : ''} onClick={() => setMode('signup')}>
+              Create account
+            </button>
+          </div>
+        )}
 
         <form onSubmit={(e) => void onSubmit(e)} className="form">
           {mode === 'signup' && (
