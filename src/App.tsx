@@ -7,6 +7,8 @@ import LoginPage from './pages/LoginPage'
 import BootstrapPage from './pages/BootstrapPage'
 import DashboardPage from './pages/DashboardPage'
 import MenuListPage from './pages/menu/MenuListPage'
+import TablesPage from './pages/tables/TablesPage'
+import ReservationsPage from './pages/reservations/ReservationsPage'
 import AuditPage from './pages/AuditPage'
 import UnauthorizedPage from './pages/UnauthorizedPage'
 
@@ -46,6 +48,15 @@ export default function App() {
                 }
               />
               <Route path="menu" element={<MenuListPage />} />
+              <Route path="tables" element={<TablesPage />} />
+              <Route
+                path="reservations"
+                element={
+                  <RequirePermission permission="reservations.view">
+                    <ReservationsPage />
+                  </RequirePermission>
+                }
+              />
               <Route
                 path="audit"
                 element={

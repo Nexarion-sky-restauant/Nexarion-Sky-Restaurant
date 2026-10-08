@@ -29,6 +29,10 @@ that does and does not cover).
 | `src/test/ErrorBoundary.test.tsx` | Global error boundary fallback |
 | `src/test/menuValidation.test.ts` | Menu validation rules: price parsing/bounds, name/description limits, image type & size, currency formatting |
 | `src/test/MenuPage.test.tsx` | Menu page (manager/staff views): read-only gating, availability toggle + failure alert, inactive filter, category/item editors, image upload → signed URL render |
+| `src/test/tablesValidation.test.ts` | Floor-plan validation rules: name/zone length bounds, capacity parsing |
+| `src/test/reservationsValidation.test.ts` | Reservation validation: timezone conversion & DST edges, day bounds, duration/party/note bounds, half-open overlap pre-check, the client-side transition table |
+| `src/test/TablesPage.test.tsx` | Tables page (manager/staff): zone grouping with counts, inactive filter, branch picker, read-only gating, load-error retry, editor modal (create/edit/validation) |
+| `src/test/ReservationsPage.test.tsx` | Reservations page: day view, status transitions (cancel gated by permission), conflict pre-check before save, editor modal, viewer/staff/manager views |
 | `src/test/security.test.ts` | Static invariants over the SQL migrations and `public/_headers` |
 | `src/test/fixtures.ts` | Deterministic IDs and payload factories |
 | `src/test/authMock.ts` | Full `useAuth` context mock factory |
@@ -63,7 +67,8 @@ security headers regress on:
   preconditions (authenticated caller, single organization, unique slug)
 - schema lockdown: nothing granted to `anon`/`public`; only the required
   functions executable by `authenticated`
-- permission catalog: 58 unique keys in `<department>.<action>` form, and every
+- permission catalog: 63 unique keys in `<department>.<action>` form across the
+  two catalog inserts (58 foundation + 5 tables/reservations), and every
   permission key referenced by the UI exists in the catalog
 - menu migration (`20261008000002`): both tables RLS-enabled; **no delete
   surface** (no delete/truncate grants, no delete policies); members read,
@@ -72,6 +77,23 @@ security headers regress on:
   index; column-level bounds (price > 0, name/description/image-path lengths);
   audit triggers on create/update; private `menu-images` bucket (2 MB,
   JPEG/PNG/WebP) with org-folder-scoped storage rules
+- tables & reservations migration (`20261008000003`): both tables RLS-enabled;
+  **no delete surface**; floor plan read by branch access, `tables.manage`
+  writes; reservations gated `view`/`create`/`edit`/`cancel`, all compounded
+  with branch access; UPDATE policies carry both `using` and `with check`;
+  composite FKs pin reservations to a same-branch/organization table and
+  tables to a same-organization branch; active-name unique index per branch;
+  GiST exclusion constraint over `[starts_at, ends_at)` for
+  pending/confirmed/seated statuses; `ends_at` derived by trigger; lifecycle
+  guard with the cancel-permission gate; five permission keys backfilled onto
+  existing system roles and re-seeded in `bootstrap_organization`
+- audit branch attribution (shared `audit_row_change` helper): only the two
+  new triggers pass the `'branch'` argument — the cross-migration invocation
+  list is asserted to be exactly `menu.category`/`menu.item` (no branch) plus
+  `tables.table`/`reservations.reservation` (branch), so menu audit rows keep
+  `branch_id` NULL **by construction**; the helper reads `new./old.branch_id`
+  only inside the `tg_argv[1] = 'branch'` gate, and its signature/ACLs are
+  unchanged by the re-declaration
 - no service-role references anywhere in the frontend
 - `public/_headers`: CSP (self + Google Fonts + the three Supabase origins,
   no `unsafe-inline`/`unsafe-eval`; `img-src` additionally allows the Supabase
@@ -91,5 +113,6 @@ GitHub Actions update PRs, which go through the same gate.
 - **Live RLS/integration tests** (two organizations, cross-org read/write
   probes, bootstrap RPC round-trip against Postgres) require either a fourth
   isolated Supabase project or a pgTAP harness. Both are deferred pending
-  explicit approval — until then those behaviours were verified manually on
-  staging during Phase 2 and are re-verified per deploy.
+  explicit approval — until then those behaviours are verified manually on
+  staging during each module's acceptance run (menu, tables & reservations)
+  and re-verified per deploy.

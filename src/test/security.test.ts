@@ -33,6 +33,19 @@ const CATALOG_KEYS = new Set(
   [...catalogSection.matchAll(/'([a-z_]+\.[a-z_]+)'\s*,\s*'[a-z_]+'/g)].map((m) => m[1]),
 )
 
+// Phase 2 (tables & reservations) appends a second catalog insert; bound it
+// by the role_permissions backfill that follows it.
+const CATALOG2_START = ALL_SQL.indexOf('insert into app.permissions', CATALOG_END)
+const CATALOG2_END = ALL_SQL.indexOf('insert into app.role_permissions', CATALOG2_START)
+const catalog2Section =
+  CATALOG2_START >= 0 && CATALOG2_END > CATALOG2_START
+    ? ALL_SQL.slice(CATALOG2_START, CATALOG2_END)
+    : ''
+const CATALOG2_KEYS = new Set(
+  [...catalog2Section.matchAll(/'([a-z_]+\.[a-z_]+)'\s*,\s*'[a-z_]+'/g)].map((m) => m[1]),
+)
+const ALL_CATALOG_KEYS = new Set([...CATALOG_KEYS, ...CATALOG2_KEYS])
+
 /** Text of the LAST declaration of app.<name> (last CREATE wins in Postgres). */
 function lastDeclaration(name: string): string {
   const marker = `create or replace function app.${name}(`
@@ -77,6 +90,7 @@ describe('migration inventory', () => {
         '20260929000001_bootstrap_attach_guard_fix.sql',
         '20261008000001_audit_integrity_hardening.sql',
         '20261008000002_menu_management.sql',
+        '20261008000003_tables_reservations.sql',
       ]),
     )
   })
@@ -174,6 +188,8 @@ describe('authorization helpers (static)', () => {
     'guard_profile_update',
     'get_my_access',
     'bootstrap_organization',
+    'guard_reservation_status',
+    'audit_row_change',
   ]
 
   it('pins an empty search_path on every security-definer function declaration', () => {
@@ -458,6 +474,322 @@ describe('menu management migration (static)', () => {
   })
 })
 
+describe('tables and reservations migration (static)', () => {
+  const TABLES_SQL = readFileSync(
+    join(MIGRATIONS_DIR, '20261008000003_tables_reservations.sql'),
+    'utf8',
+  )
+  const TABLES_FLAT = TABLES_SQL.replace(/\s+/g, ' ')
+
+  it('creates both tables with row level security enabled', () => {
+    const created = [...TABLES_SQL.matchAll(/create table\s+app\.(\w+)/gi)].map((m) => m[1])
+    expect(created).toEqual(['restaurant_tables', 'table_reservations'])
+    const enabled = new Set(
+      [...TABLES_SQL.matchAll(/alter table\s+app\.(\w+)\s+enable row level security/gi)].map(
+        (m) => m[1],
+      ),
+    )
+    for (const table of created) {
+      expect(enabled.has(table), `RLS is not enabled on app.${table}`).toBe(true)
+    }
+  })
+
+  it('exposes no delete surface on the floor plan or reservations', () => {
+    const grants = [...TABLES_SQL.matchAll(/grant\s[^;]+;/gi)].map((m) => m[0])
+    expect(grants.length).toBeGreaterThanOrEqual(4)
+    for (const statement of grants) {
+      expect(statement).not.toMatch(/\b(delete|truncate)\b/i)
+    }
+
+    const policies = [...TABLES_SQL.matchAll(/create policy\s+\w+[\s\S]*?;/gi)].map((m) => m[0])
+    expect(policies).toHaveLength(6)
+    for (const statement of policies) {
+      expect(statement).not.toMatch(/\bfor\s+delete\b/i)
+    }
+  })
+
+  it('scopes table policies per command: members read, tables.manage writes', () => {
+    const tablePolicies = [
+      ...TABLES_SQL.matchAll(
+        /create policy\s+(\w+)\s+on\s+app\.restaurant_tables\s+for\s+(\w+)([\s\S]*?);/gi,
+      ),
+    ].map((m) => ({ name: m[1], command: m[2].toLowerCase(), body: m[3].replace(/\s+/g, ' ') }))
+
+    expect(tablePolicies).toHaveLength(3)
+    expect(tablePolicies.map((policy) => policy.command).sort()).toEqual([
+      'insert',
+      'select',
+      'update',
+    ])
+    for (const policy of tablePolicies) {
+      expect(policy.body, `policy ${policy.name} must target authenticated`).toMatch(
+        /\bto authenticated\b/,
+      )
+      expect(policy.body).toContain('app.user_can_access_branch(branch_id)')
+      if (policy.command === 'select') {
+        expect(policy.body).not.toContain('user_has_permission')
+      } else {
+        expect(policy.body).toContain("app.user_has_permission('tables.manage')")
+      }
+    }
+
+    // UPDATE carries both USING and WITH CHECK, so a table can neither be
+    // read-into nor written-from another branch or organization.
+    const updatePolicies = tablePolicies.filter((policy) => policy.command === 'update')
+    expect(updatePolicies).toHaveLength(1)
+    expect(updatePolicies[0].body.match(/app\.user_can_access_branch\(branch_id\)/g)).toHaveLength(2)
+    expect(updatePolicies[0].body.match(/app\.user_has_permission\('tables\.manage'\)/g)).toHaveLength(2)
+  })
+
+  it('scopes reservation policies per command: view, create, edit or cancel', () => {
+    const reservationPolicies = [
+      ...TABLES_SQL.matchAll(
+        /create policy\s+(\w+)\s+on\s+app\.table_reservations\s+for\s+(\w+)([\s\S]*?);/gi,
+      ),
+    ].map((m) => ({ name: m[1], command: m[2].toLowerCase(), body: m[3].replace(/\s+/g, ' ') }))
+
+    expect(reservationPolicies).toHaveLength(3)
+    expect(reservationPolicies.map((policy) => policy.command).sort()).toEqual([
+      'insert',
+      'select',
+      'update',
+    ])
+    for (const policy of reservationPolicies) {
+      expect(policy.body, `policy ${policy.name} must target authenticated`).toMatch(
+        /\bto authenticated\b/,
+      )
+      expect(policy.body).toContain('app.user_can_access_branch(branch_id)')
+    }
+
+    const requiredPermission: Record<string, string> = {
+      select: "app.user_has_permission('reservations.view')",
+      insert: "app.user_has_permission('reservations.create')",
+      update:
+        "app.user_has_permission('reservations.edit') or app.user_has_permission('reservations.cancel')",
+    }
+    for (const policy of reservationPolicies) {
+      expect(policy.body).toContain(requiredPermission[policy.command])
+    }
+
+    const updatePolicies = reservationPolicies.filter((policy) => policy.command === 'update')
+    expect(updatePolicies).toHaveLength(1)
+    expect(updatePolicies[0].body.match(/app\.user_can_access_branch\(branch_id\)/g)).toHaveLength(2)
+    expect(
+      updatePolicies[0].body.match(/user_has_permission\('reservations\.edit'\)/g),
+    ).toHaveLength(2)
+    expect(
+      updatePolicies[0].body.match(/user_has_permission\('reservations\.cancel'\)/g),
+    ).toHaveLength(2)
+  })
+
+  it('structurally pins reservations to their own table, branch and organization', () => {
+    expect(TABLES_FLAT).toContain(
+      'alter table app.branches add constraint branches_id_org_key unique (id, organization_id);',
+    )
+    expect(TABLES_FLAT).toContain(
+      'constraint restaurant_tables_branch_fk foreign key (branch_id, organization_id) references app.branches (id, organization_id) on delete restrict,',
+    )
+    expect(TABLES_FLAT).toContain(
+      'constraint restaurant_tables_id_branch_org_key unique (id, branch_id, organization_id),',
+    )
+    expect(TABLES_FLAT).toContain(
+      'constraint table_reservations_table_fk foreign key (table_id, branch_id, organization_id) references app.restaurant_tables (id, branch_id, organization_id) on delete restrict,',
+    )
+    expect(TABLES_FLAT).toContain(
+      'create unique index restaurant_tables_branch_name_active_idx on app.restaurant_tables (branch_id, lower(btrim(name))) where is_active;',
+    )
+  })
+
+  it('prevents overlapping active reservations per table at write time', () => {
+    expect(TABLES_FLAT).toContain(
+      'create extension if not exists btree_gist with schema extensions;',
+    )
+    expect(TABLES_FLAT).toContain(
+      "constraint table_reservations_no_overlap exclude using gist ( table_id with =, tstzrange(starts_at, ends_at) with && ) where (status in ('pending', 'confirmed', 'seated'))",
+    )
+  })
+
+  it('derives ends_at from starts_at + duration on the server', () => {
+    expect(TABLES_FLAT).toContain('ends_at timestamptz not null,')
+    expect(TABLES_FLAT).not.toContain('ends_at timestamptz not null default')
+    expect(TABLES_FLAT).toContain(
+      'constraint table_reservations_ends_after_start check (ends_at > starts_at),',
+    )
+
+    const setWindow = lastDeclaration('set_reservation_window').replace(/\s+/g, ' ')
+    expect(setWindow).not.toMatch(/security definer/i)
+    expect(setWindow).toContain(
+      'new.ends_at := new.starts_at + make_interval(mins => new.duration_minutes);',
+    )
+  })
+
+  it('bounds names, guests, parties, durations and notes at the column level', () => {
+    expect(TABLES_FLAT).toContain(
+      'constraint restaurant_tables_name_length check (char_length(btrim(name)) between 1 and 80)',
+    )
+    expect(TABLES_FLAT).toContain(
+      'constraint restaurant_tables_zone_length check (char_length(btrim(zone)) between 1 and 60)',
+    )
+    expect(TABLES_FLAT).toContain(
+      'constraint restaurant_tables_capacity_bounds check (capacity between 1 and 100)',
+    )
+    expect(TABLES_FLAT).toContain(
+      'constraint table_reservations_guest_name_length check (char_length(btrim(guest_name)) between 1 and 120)',
+    )
+    expect(TABLES_FLAT).toContain(
+      'constraint table_reservations_guest_phone_length check (char_length(guest_phone) <= 32)',
+    )
+    expect(TABLES_FLAT).toContain(
+      'constraint table_reservations_party_size_bounds check (party_size between 1 and 100)',
+    )
+    expect(TABLES_FLAT).toContain(
+      'constraint table_reservations_duration_bounds check (duration_minutes between 15 and 480)',
+    )
+    expect(TABLES_FLAT).toContain(
+      'constraint table_reservations_notes_length check (char_length(notes) <= 2000)',
+    )
+    expect(TABLES_FLAT).toContain(
+      "constraint table_reservations_status_check check (status in ('pending', 'confirmed', 'seated', 'completed', 'cancelled', 'no_show'))",
+    )
+  })
+
+  it('enforces the reservation lifecycle from insert through cancel in the guard trigger', () => {
+    const guard = lastDeclaration('guard_reservation_status').replace(/\s+/g, ' ')
+    expect(guard).toMatch(/security definer/i)
+    expect(guard).toContain("set search_path = ''")
+
+    expect(guard).toContain("if new.status not in ('pending', 'confirmed') then")
+    expect(guard).toContain('A reservation cannot be created with status')
+    expect(guard).toContain('if new.status = old.status then')
+    expect(guard).toContain(
+      "(old.status = 'pending' and new.status in ('confirmed', 'cancelled')) or (old.status = 'confirmed' and new.status in ('seated', 'cancelled', 'no_show')) or (old.status = 'seated' and new.status = 'completed')",
+    )
+
+    // Moving a reservation into cancelled requires the dedicated permission;
+    // the gate must sit after the transition-table check.
+    const transitionCheck = guard.indexOf('Invalid reservation transition')
+    const cancelGate = guard.indexOf("app.user_has_permission('reservations.cancel')")
+    expect(transitionCheck).toBeGreaterThanOrEqual(0)
+    expect(cancelGate).toBeGreaterThan(transitionCheck)
+    expect(guard).toContain(
+      "if new.status = 'cancelled' and not app.user_has_permission('reservations.cancel') then",
+    )
+  })
+
+  it('wires exactly six triggers with the audit triggers opting into branch attribution', () => {
+    const triggers = [...TABLES_SQL.matchAll(/create trigger\s+\w+[\s\S]*?;/gi)].map((m) =>
+      m[0].replace(/\s+/g, ' ').trim(),
+    )
+    expect(triggers).toEqual([
+      'create trigger restaurant_tables_set_updated_at before update on app.restaurant_tables for each row execute function app.set_updated_at();',
+      "create trigger restaurant_tables_audit_change after insert or update on app.restaurant_tables for each row execute function app.audit_row_change('tables.table', 'branch');",
+      'create trigger table_reservations_set_window before insert or update on app.table_reservations for each row execute function app.set_reservation_window();',
+      'create trigger table_reservations_guard_status before insert or update on app.table_reservations for each row execute function app.guard_reservation_status();',
+      'create trigger table_reservations_set_updated_at before update on app.table_reservations for each row execute function app.set_updated_at();',
+      "create trigger table_reservations_audit_change after insert or update on app.table_reservations for each row execute function app.audit_row_change('reservations.reservation', 'branch');",
+    ])
+  })
+
+  it('grants the trigger functions to authenticated and locks them away from public', () => {
+    expect(TABLES_FLAT).toContain(
+      'revoke execute on function app.set_reservation_window() from public;',
+    )
+    expect(TABLES_FLAT).toContain(
+      'revoke execute on function app.guard_reservation_status() from public;',
+    )
+    expect(TABLES_FLAT).toContain(
+      'grant execute on function app.set_reservation_window() to authenticated;',
+    )
+    expect(TABLES_FLAT).toContain(
+      'grant execute on function app.guard_reservation_status() to authenticated;',
+    )
+    // audit_row_change keeps its existing ACLs: CREATE OR REPLACE preserves them.
+    expect(TABLES_FLAT).not.toContain('revoke execute on function app.audit_row_change')
+    expect(TABLES_FLAT).not.toContain('grant execute on function app.audit_row_change')
+  })
+
+  it('backfills the new keys onto the system roles of existing organizations', () => {
+    // owner/administrator mirror the bootstrap rule dynamically.
+    expect(TABLES_FLAT).toContain(
+      "insert into app.role_permissions (role_id, permission_key) select r.id, p.key from app.roles r cross join app.permissions p where r.is_system and (r.name = 'owner' or (r.name = 'administrator' and p.key <> 'org.manage')) on conflict do nothing;",
+    )
+    // manager gets all five keys, staff gets view/create/edit but neither
+    // tables.manage nor reservations.cancel.
+    expect(TABLES_FLAT).toContain(
+      "cross join (values ('tables.manage'), ('reservations.view'), ('reservations.create'), ('reservations.edit'), ('reservations.cancel') ) as v(key) where r.is_system and r.name = 'manager'",
+    )
+    expect(TABLES_FLAT).toContain(
+      "cross join (values ('reservations.view'), ('reservations.create'), ('reservations.edit') ) as v(key) where r.is_system and r.name = 'staff'",
+    )
+
+    const bootstrap = lastDeclaration('bootstrap_organization').replace(/\s+/g, ' ')
+    for (const key of [
+      'tables.manage',
+      'reservations.view',
+      'reservations.create',
+      'reservations.edit',
+      'reservations.cancel',
+    ]) {
+      expect(bootstrap, `bootstrap_organization must seed ${key}`).toContain(`'${key}'`)
+    }
+  })
+})
+
+describe('audit branch attribution (shared helper, D9)', () => {
+  it('keeps the helper security definer with an opt-in branch gate only', () => {
+    const header = lastDeclarationHeader('audit_row_change')
+    expect(header).toContain('app.audit_row_change()')
+    expect(header).toMatch(/security definer/i)
+    expect(header).toContain("set search_path = ''")
+
+    const helper = lastDeclaration('audit_row_change').replace(/\s+/g, ' ')
+    expect(helper).toContain("v_action := 'create';")
+    expect(helper).toContain("v_action := 'update';")
+    expect(helper).toContain("v_action := 'delete';")
+    expect(helper).toContain('perform app.log_audit(')
+    expect(helper).toContain("if tg_argv[1] = 'branch' then")
+    expect(helper).toContain('v_branch_id uuid;')
+    expect(helper).toContain('v_branch_id := new.branch_id;')
+    expect(helper).toContain('v_branch_id := old.branch_id;')
+    expect(helper).toContain('coalesce(tg_argv[0], tg_table_name), v_entity_id, v_branch_id,')
+    // The branch columns are read only inside the opt-in gate, exactly once.
+    expect(helper.match(/new\.branch_id/g)).toHaveLength(1)
+    expect(helper.match(/old\.branch_id/g)).toHaveLength(1)
+  })
+
+  it('is invoked with a branch argument only by the new table and reservation triggers', () => {
+    const invocations = [
+      ...ALL_SQL.matchAll(/app\.audit_row_change\('([^']+)'(?:\s*,\s*'([^']*)')?\)/g),
+    ].map((m) => [m[1], m[2] ?? null] as const)
+    // The two menu triggers pass a single argument, so tg_argv[1] is NULL for
+    // them and their audit rows keep branch_id NULL by construction.
+    expect(invocations).toEqual([
+      ['menu.category', null],
+      ['menu.item', null],
+      ['tables.table', 'branch'],
+      ['reservations.reservation', 'branch'],
+    ])
+  })
+
+  it('leaves the menu migration untouched and redeclares only the expected functions', () => {
+    const tablesSql = readFileSync(
+      join(MIGRATIONS_DIR, '20261008000003_tables_reservations.sql'),
+      'utf8',
+    )
+    expect(tablesSql).not.toMatch(/on app\.menu_(categories|items)/)
+
+    const redeclared = [...tablesSql.matchAll(/create or replace function\s+app\.(\w+)\s*\(/gi)]
+      .map((m) => m[1])
+      .sort()
+    expect(redeclared).toEqual([
+      'audit_row_change',
+      'bootstrap_organization',
+      'guard_reservation_status',
+      'set_reservation_window',
+    ])
+  })
+})
+
 describe('permission catalog (static)', () => {
   const DEPARTMENTS = [
     'accounting',
@@ -469,16 +801,19 @@ describe('permission catalog (static)', () => {
     'management',
     'organization',
     'purchasing',
+    'reservations',
     'restaurant',
     'rooms',
+    'tables',
   ]
 
-  it('seeds 58 unique, well-formed permission keys', () => {
+  it('seeds 63 unique, well-formed permission keys across both catalog inserts', () => {
     const rows = [
-      ...catalogSection.matchAll(/\(\s*'([a-z_]+\.[a-z_]+)'\s*,\s*'([a-z_]+)'/g),
+      ...[...catalogSection.matchAll(/\(\s*'([a-z_]+\.[a-z_]+)'\s*,\s*'([a-z_]+)'/g)],
+      ...[...catalog2Section.matchAll(/\(\s*'([a-z_]+\.[a-z_]+)'\s*,\s*'([a-z_]+)'/g)],
     ].map((m) => ({ key: m[1], department: m[2] }))
-    expect(rows).toHaveLength(58)
-    expect(new Set(rows.map((row) => row.key)).size).toBe(58)
+    expect(rows).toHaveLength(63)
+    expect(new Set(rows.map((row) => row.key)).size).toBe(63)
     for (const row of rows) {
       expect(DEPARTMENTS).toContain(row.department)
     }
@@ -494,8 +829,10 @@ describe('permission catalog (static)', () => {
     }
     expect(referenced.has('dashboard.view')).toBe(true)
     expect(referenced.has('audit.view')).toBe(true)
+    expect(referenced.has('tables.manage')).toBe(true)
+    expect(referenced.has('reservations.view')).toBe(true)
     for (const key of referenced) {
-      expect(CATALOG_KEYS.has(key), `src references unknown permission key '${key}'`).toBe(true)
+      expect(ALL_CATALOG_KEYS.has(key), `src references unknown permission key '${key}'`).toBe(true)
     }
   })
 })
