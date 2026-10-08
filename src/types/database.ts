@@ -1,4 +1,4 @@
-// Hand-written types for the Phase 1+2 foundation schema (schema `app`).
+// Hand-written types for the Phase 1-3 foundation schema (schema `app`).
 // Regenerate with `supabase gen types typescript` once the CLI is available in
 // CI if tighter typing is wanted; these cover everything the foundation UI uses.
 
@@ -121,6 +121,45 @@ export type TableReservation = {
   updated_at: string
 }
 
+export type OrderType = 'dine_in' | 'takeaway'
+
+export type OrderStatus = 'open' | 'placed' | 'served' | 'completed' | 'cancelled'
+
+export type OrderItemStatus = 'queued' | 'preparing' | 'ready' | 'served'
+
+export type Order = {
+  id: string
+  organization_id: string
+  branch_id: string
+  table_id: string | null
+  reservation_id: string | null
+  order_type: OrderType
+  status: OrderStatus
+  notes: string
+  created_by: string
+  created_at: string
+  updated_at: string
+}
+
+export type OrderItem = {
+  id: string
+  order_id: string
+  organization_id: string
+  branch_id: string
+  menu_item_id: string
+  name_snapshot: string
+  unit_price: number
+  quantity: number
+  notes: string
+  status: OrderItemStatus
+  voided_at: string | null
+  voided_by: string | null
+  void_reason: string
+  line_total: number
+  created_at: string
+  updated_at: string
+}
+
 export interface AccessPayload {
   profile: Profile | null
   organization: Organization | null
@@ -181,6 +220,39 @@ export interface Database {
           id?: string
         }
         Update: Partial<Omit<TableReservation, 'id' | 'organization_id' | 'branch_id' | 'ends_at'>>
+        Relationships: []
+      }
+      orders: {
+        Row: Order
+        // status is pinned to 'open' and created_by stamped server-side by
+        // app.guard_order_status; clients may send status only as 'open'.
+        Insert: Omit<Order, 'id' | 'created_at' | 'updated_at' | 'created_by' | 'status'> & {
+          id?: string
+          status?: OrderStatus
+        }
+        Update: Partial<Pick<Order, 'table_id' | 'reservation_id' | 'order_type' | 'status' | 'notes'>>
+        Relationships: []
+      }
+      order_items: {
+        Row: OrderItem
+        // name_snapshot/unit_price are derived from app.menu_items and
+        // branch/organization inherit from the parent order, so clients never
+        // send them; line_total is a stored generated column.
+        Insert: {
+          id?: string
+          order_id: string
+          menu_item_id: string
+          quantity?: number
+          notes?: string
+        }
+        // Voiding sends voided_at + void_reason; the guard forces the pair.
+        Update: {
+          quantity?: number
+          notes?: string
+          status?: OrderItemStatus
+          voided_at?: string
+          void_reason?: string
+        }
         Relationships: []
       }
     }

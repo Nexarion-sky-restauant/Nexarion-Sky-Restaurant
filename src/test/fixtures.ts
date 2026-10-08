@@ -4,6 +4,8 @@ import type {
   Branch,
   MenuCategory,
   MenuItem,
+  Order,
+  OrderItem,
   Organization,
   Profile,
   RestaurantTable,
@@ -16,8 +18,10 @@ export const TEST_BRANCH_ID = '33333333-3333-4333-8333-333333333333'
 export const TEST_CATEGORY_ID = '44444444-4444-4444-8444-444444444444'
 export const TEST_ITEM_ID = '55555555-5555-4555-8555-555555555555'
 export const TEST_TABLE_ID = '66666666-6666-4666-8666-666666666666'
+export const TEST_ORDER_ID = '77777777-7777-4777-8777-777777777777'
 export const TEST_RESERVATION_ID = '88888888-8888-4888-8888-888888888888'
 export const TEST_SECOND_BRANCH_ID = '99999999-9999-4999-8999-999999999999'
+export const TEST_ORDER_ITEM_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 
 const NOW = '2026-01-01T00:00:00.000Z'
 
@@ -127,6 +131,45 @@ export function makeReservation(overrides: Partial<TableReservation> = {}): Tabl
     ends_at: '2026-01-01T18:00:00.000Z',
     status: 'confirmed',
     notes: '',
+    created_at: NOW,
+    updated_at: NOW,
+    ...overrides,
+  }
+}
+
+export function makeOrder(overrides: Partial<Order> = {}): Order {
+  return {
+    id: TEST_ORDER_ID,
+    organization_id: TEST_ORG_ID,
+    branch_id: TEST_BRANCH_ID,
+    table_id: TEST_TABLE_ID,
+    reservation_id: null,
+    order_type: 'dine_in',
+    status: 'open',
+    notes: '',
+    created_by: TEST_USER_ID,
+    created_at: NOW,
+    updated_at: NOW,
+    ...overrides,
+  }
+}
+
+export function makeOrderItem(overrides: Partial<OrderItem> = {}): OrderItem {
+  return {
+    id: TEST_ORDER_ITEM_ID,
+    order_id: TEST_ORDER_ID,
+    organization_id: TEST_ORG_ID,
+    branch_id: TEST_BRANCH_ID,
+    menu_item_id: TEST_ITEM_ID,
+    name_snapshot: 'Truffle Soup',
+    unit_price: 950,
+    quantity: 2,
+    notes: '',
+    status: 'queued',
+    voided_at: null,
+    voided_by: null,
+    void_reason: '',
+    line_total: 1900,
     created_at: NOW,
     updated_at: NOW,
     ...overrides,

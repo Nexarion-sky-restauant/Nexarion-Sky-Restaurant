@@ -14,6 +14,8 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/menu', label: 'Menu', icon: '✦' },
   { to: '/tables', label: 'Tables', icon: '▤' },
   { to: '/reservations', label: 'Reservations', icon: '◷', permission: 'reservations.view' },
+  { to: '/orders', label: 'Orders', icon: '▣', permission: 'pos.view' },
+  { to: '/kitchen', label: 'Kitchen', icon: '♨', permission: 'kitchen.view' },
   { to: '/audit', label: 'Audit Log', icon: '≣', permission: 'audit.view' },
 ]
 
@@ -57,9 +59,9 @@ export default function AppShell() {
 
         <div className="sidebar-note">
           <div className="sidebar-note-title">Foundation</div>
-          Menu Management, Tables and Reservations are live. Rooms, POS,
-          inventory, accounting and the remaining departments activate in their
-          approved phases.
+          Menu Management, Tables, Reservations, Orders and Kitchen are live.
+          Rooms, inventory, accounting and the remaining departments activate in
+          their approved phases.
         </div>
       </aside>
 
