@@ -9,6 +9,8 @@ import DashboardPage from './pages/DashboardPage'
 import MenuListPage from './pages/menu/MenuListPage'
 import TablesPage from './pages/tables/TablesPage'
 import ReservationsPage from './pages/reservations/ReservationsPage'
+import OrdersPage from './pages/orders/OrdersPage'
+import KitchenPage from './pages/kitchen/KitchenPage'
 import AuditPage from './pages/AuditPage'
 import UnauthorizedPage from './pages/UnauthorizedPage'
 
@@ -54,6 +56,22 @@ export default function App() {
                 element={
                   <RequirePermission permission="reservations.view">
                     <ReservationsPage />
+                  </RequirePermission>
+                }
+              />
+              <Route
+                path="orders"
+                element={
+                  <RequirePermission permission="pos.view">
+                    <OrdersPage />
+                  </RequirePermission>
+                }
+              />
+              <Route
+                path="kitchen"
+                element={
+                  <RequirePermission permission="kitchen.view">
+                    <KitchenPage />
                   </RequirePermission>
                 }
               />

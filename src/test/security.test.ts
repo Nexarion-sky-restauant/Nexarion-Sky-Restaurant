@@ -91,6 +91,7 @@ describe('migration inventory', () => {
         '20261008000001_audit_integrity_hardening.sql',
         '20261008000002_menu_management.sql',
         '20261008000003_tables_reservations.sql',
+        '20261008000004_orders_kitchen.sql',
       ]),
     )
   })
@@ -735,6 +736,319 @@ describe('tables and reservations migration (static)', () => {
   })
 })
 
+describe('orders and kitchen migration (static)', () => {
+  const ORDERS_SQL = readFileSync(
+    join(MIGRATIONS_DIR, '20261008000004_orders_kitchen.sql'),
+    'utf8',
+  )
+  const ORDERS_FLAT = ORDERS_SQL.replace(/\s+/g, ' ')
+
+  it('adds exactly the two order tables with RLS enabled and no destructive statements', () => {
+    const created = [...ORDERS_SQL.matchAll(/create table\s+app\.(\w+)/gi)].map((m) => m[1])
+    expect(created).toEqual(['orders', 'order_items'])
+    expect(ORDERS_FLAT).toContain('alter table app.orders enable row level security;')
+    expect(ORDERS_FLAT).toContain('alter table app.order_items enable row level security;')
+    expect(ORDERS_SQL).not.toMatch(/\bdrop\b/i)
+
+    // The only touches on pre-existing tables are two additive unique keys,
+    // one per table, that make the new composite foreign keys possible.
+    expect([...ORDERS_FLAT.matchAll(/alter table app\.menu_items/g)]).toHaveLength(1)
+    expect([...ORDERS_FLAT.matchAll(/alter table app\.table_reservations/g)]).toHaveLength(1)
+    expect(ORDERS_FLAT).toContain(
+      'alter table app.menu_items add constraint menu_items_id_org_key unique (id, organization_id);',
+    )
+    expect(ORDERS_FLAT).toContain(
+      'alter table app.table_reservations add constraint table_reservations_id_branch_key unique (id, branch_id);',
+    )
+  })
+
+  it('pins orders to branch, table and reservation with composite foreign keys', () => {
+    expect(ORDERS_FLAT).toContain(
+      'constraint orders_branch_fk foreign key (branch_id, organization_id) references app.branches (id, organization_id) on delete restrict,',
+    )
+    expect(ORDERS_FLAT).toContain(
+      'constraint orders_table_fk foreign key (table_id, branch_id, organization_id) references app.restaurant_tables (id, branch_id, organization_id) on delete restrict,',
+    )
+    expect(ORDERS_FLAT).toContain(
+      'constraint orders_reservation_fk foreign key (reservation_id, branch_id) references app.table_reservations (id, branch_id) on delete restrict,',
+    )
+    expect(ORDERS_FLAT).toContain(
+      'constraint orders_id_branch_org_key unique (id, branch_id, organization_id),',
+    )
+    expect(ORDERS_FLAT).toContain(
+      'constraint order_items_order_fk foreign key (order_id, branch_id, organization_id) references app.orders (id, branch_id, organization_id) on delete restrict,',
+    )
+    expect(ORDERS_FLAT).toContain(
+      'constraint order_items_menu_item_fk foreign key (menu_item_id, organization_id) references app.menu_items (id, organization_id) on delete restrict,',
+    )
+  })
+
+  it('bounds order and item columns and derives line_total on the server', () => {
+    expect(ORDERS_FLAT).toContain("status text not null default 'open',")
+    expect(ORDERS_FLAT).toContain('created_by uuid not null default auth.uid(),')
+    expect(ORDERS_FLAT).toContain(
+      "constraint orders_type_check check (order_type in ('dine_in', 'takeaway')),",
+    )
+    expect(ORDERS_FLAT).toContain(
+      "constraint orders_status_check check (status in ('open', 'placed', 'served', 'completed', 'cancelled')),",
+    )
+    expect(ORDERS_FLAT).toContain(
+      'constraint orders_notes_length check (char_length(notes) <= 500)',
+    )
+
+    expect(ORDERS_FLAT).toContain('quantity smallint not null default 1,')
+    expect(ORDERS_FLAT).toContain(
+      'line_total numeric(14,2) generated always as (unit_price * quantity) stored,',
+    )
+    expect(ORDERS_FLAT).toContain(
+      "constraint order_items_status_check check (status in ('queued', 'preparing', 'ready', 'served')),",
+    )
+    expect(ORDERS_FLAT).toContain(
+      'constraint order_items_name_length check (char_length(btrim(name_snapshot)) between 1 and 120),',
+    )
+    expect(ORDERS_FLAT).toContain(
+      'constraint order_items_unit_price_positive check (unit_price > 0),',
+    )
+    expect(ORDERS_FLAT).toContain(
+      'constraint order_items_quantity_bounds check (quantity between 1 and 99),',
+    )
+    expect(ORDERS_FLAT).toContain(
+      'constraint order_items_notes_length check (char_length(notes) <= 200),',
+    )
+    expect(ORDERS_FLAT).toContain(
+      "constraint order_items_void_consistency check ( (voided_at is null and voided_by is null and void_reason = '') or (voided_at is not null and voided_by is not null and char_length(btrim(void_reason)) between 1 and 200) )",
+    )
+  })
+
+  it('scopes order policies per command with no delete surface', () => {
+    const policies = [
+      ...ORDERS_SQL.matchAll(
+        /create policy\s+(\w+)\s+on\s+app\.orders\s+for\s+(\w+)([\s\S]*?);/gi,
+      ),
+    ].map((m) => ({ name: m[1], command: m[2].toLowerCase(), body: m[3].replace(/\s+/g, ' ') }))
+
+    expect(policies).toHaveLength(3)
+    expect(policies.map((policy) => policy.command).sort()).toEqual(['insert', 'select', 'update'])
+    for (const policy of policies) {
+      expect(policy.body, `policy ${policy.name} must target authenticated`).toMatch(
+        /\bto authenticated\b/,
+      )
+      expect(policy.body).toContain('app.user_can_access_branch(branch_id)')
+    }
+
+    const selectPolicies = policies.filter((policy) => policy.command === 'select')
+    expect(selectPolicies).toHaveLength(1)
+    expect(selectPolicies[0].body).toContain(
+      "(app.user_has_permission('pos.view') or app.user_has_permission('kitchen.view'))",
+    )
+
+    const insertPolicies = policies.filter((policy) => policy.command === 'insert')
+    expect(insertPolicies).toHaveLength(1)
+    expect(insertPolicies[0].body).toContain("app.user_has_permission('pos.create')")
+
+    // UPDATE carries both USING and WITH CHECK, so an order can neither be
+    // edited into nor out of another branch.
+    const updatePolicies = policies.filter((policy) => policy.command === 'update')
+    expect(updatePolicies).toHaveLength(1)
+    expect(updatePolicies[0].body.match(/app\.user_can_access_branch\(branch_id\)/g)).toHaveLength(2)
+    expect(updatePolicies[0].body.match(/app\.user_has_permission\('pos\.edit'\)/g)).toHaveLength(2)
+
+    const grants = [
+      ...ORDERS_SQL.matchAll(/grant\s+([^;]+)\s+on\s+app\.orders\s+to\s+authenticated;/gi),
+    ].map((m) => m[1])
+    expect(grants).toEqual(['select, insert, update'])
+  })
+
+  it('scopes order-item policies per command with one bounded delete', () => {
+    const policies = [
+      ...ORDERS_SQL.matchAll(
+        /create policy\s+(\w+)\s+on\s+app\.order_items\s+for\s+(\w+)([\s\S]*?);/gi,
+      ),
+    ].map((m) => ({ name: m[1], command: m[2].toLowerCase(), body: m[3].replace(/\s+/g, ' ') }))
+
+    expect(policies).toHaveLength(4)
+    expect(policies.map((policy) => policy.command).sort()).toEqual([
+      'delete',
+      'insert',
+      'select',
+      'update',
+    ])
+    for (const policy of policies) {
+      expect(policy.body, `policy ${policy.name} must target authenticated`).toMatch(
+        /\bto authenticated\b/,
+      )
+      expect(policy.body).toContain('app.user_can_access_branch(branch_id)')
+    }
+
+    const selectPolicies = policies.filter((policy) => policy.command === 'select')
+    expect(selectPolicies).toHaveLength(1)
+    expect(selectPolicies[0].body).toContain(
+      "(app.user_has_permission('pos.view') or app.user_has_permission('kitchen.view'))",
+    )
+
+    const insertPolicies = policies.filter((policy) => policy.command === 'insert')
+    expect(insertPolicies).toHaveLength(1)
+    expect(insertPolicies[0].body).toContain("app.user_has_permission('pos.create')")
+
+    // UPDATE is doubled like orders: pos.edit or kitchen.manage to enter the
+    // row and to stay in the branch (the guard distinguishes who may do what).
+    const updatePolicies = policies.filter((policy) => policy.command === 'update')
+    expect(updatePolicies).toHaveLength(1)
+    expect(updatePolicies[0].body.match(/app\.user_can_access_branch\(branch_id\)/g)).toHaveLength(2)
+    expect(
+      updatePolicies[0].body.match(
+        /app\.user_has_permission\('pos\.edit'\) or app\.user_has_permission\('kitchen\.manage'\)/g,
+      ),
+    ).toHaveLength(2)
+
+    // The schema's single delete surface: bounded to open orders by the guard
+    // trigger and gated on pos.edit here.
+    const deletePolicies = policies.filter((policy) => policy.command === 'delete')
+    expect(deletePolicies).toHaveLength(1)
+    expect(deletePolicies[0].body).toContain("app.user_has_permission('pos.edit')")
+
+    const grants = [
+      ...ORDERS_SQL.matchAll(/grant\s+([^;]+)\s+on\s+app\.order_items\s+to\s+authenticated;/gi),
+    ].map((m) => m[1])
+    expect(grants).toEqual(['select, insert, update, delete'])
+  })
+
+  it('enforces the order lifecycle in the guard trigger', () => {
+    const guardHeader = lastDeclarationHeader('guard_order_status')
+    expect(guardHeader).toMatch(/security definer/i)
+    expect(guardHeader).toContain("set search_path = ''")
+
+    const guard = lastDeclaration('guard_order_status').replace(/\s+/g, ' ')
+    expect(guard).toContain("if new.status <> 'open' then")
+    expect(guard).toContain('new.created_by := auth.uid();')
+    expect(guard).toContain('An order cannot be moved to another branch or organization.')
+    expect(guard).toContain('The creator of an order cannot be changed.')
+    expect(guard).toContain('Order details are frozen once the order has been placed.')
+    expect(guard).toContain(
+      "(old.status = 'open' and new.status in ('placed', 'cancelled')) or (old.status = 'placed' and new.status in ('served', 'cancelled')) or (old.status = 'served' and new.status = 'completed')",
+    )
+    expect(guard).toContain('An order cannot be placed without at least one active item.')
+    expect(guard).toContain('Every active item must be served before the order is completed.')
+
+    // Cancelling requires pos.void, and the gate must sit after the
+    // transition-table check so an invalid move reports the transition first.
+    const transitionCheck = guard.indexOf('Invalid order transition')
+    const cancelGate = guard.indexOf("app.user_has_permission('pos.void')")
+    expect(transitionCheck).toBeGreaterThanOrEqual(0)
+    expect(cancelGate).toBeGreaterThan(transitionCheck)
+    expect(guard).toContain(
+      "if new.status = 'cancelled' and not app.user_has_permission('pos.void') then",
+    )
+  })
+
+  it('enforces the item lifecycle in the guard trigger', () => {
+    const guardHeader = lastDeclarationHeader('guard_order_item_status')
+    expect(guardHeader).toMatch(/security definer/i)
+    expect(guardHeader).toContain("set search_path = ''")
+
+    const guard = lastDeclaration('guard_order_item_status').replace(/\s+/g, ' ')
+    // DELETE — the one bounded delete surface.
+    expect(guard).toContain('Order items can only be removed while the order is open.')
+    // INSERT — open parent only, identity derived from the menu item.
+    expect(guard).toContain('Items can only be added while the order is open.')
+    expect(guard).toContain(
+      'select name, price into v_name, v_price from app.menu_items where id = new.menu_item_id and organization_id = v_order.organization_id;',
+    )
+    expect(guard).toContain('new.name_snapshot := v_name;')
+    expect(guard).toContain('new.unit_price := v_price;')
+    expect(guard).toContain("new.status := 'queued';")
+    // UPDATE — identity frozen, void one-way, kitchen chain permissioned.
+    expect(guard).toContain('The menu item, name and price of an order item cannot be changed.')
+    expect(guard).toContain('A voided order item can no longer be changed.')
+    expect(guard).toContain('Voiding an order item requires the pos.void permission.')
+    expect(guard).toContain('Voiding an order item requires a reason.')
+    expect(guard).toContain('new.voided_at := now();')
+    expect(guard).toContain('new.voided_by := auth.uid();')
+    expect(guard).toContain('Editing an item of an open order requires the pos.edit permission.')
+    expect(guard).toContain('Order item details are frozen once the order has been placed.')
+    expect(guard).toContain(
+      "(old.status = 'queued' and new.status = 'preparing') or (old.status = 'preparing' and new.status = 'ready') or (old.status = 'ready' and new.status = 'served')",
+    )
+    expect(guard).toContain(
+      "if new.status in ('preparing', 'ready') and not app.user_has_permission('kitchen.manage') then",
+    )
+    expect(guard).toContain(
+      "if new.status = 'served' and not app.user_has_permission('pos.edit') then",
+    )
+  })
+
+  it('wires exactly six triggers with branch-attributed audits', () => {
+    const triggers = [...ORDERS_SQL.matchAll(/create trigger\s+\w+[\s\S]*?;/gi)].map((m) =>
+      m[0].replace(/\s+/g, ' ').trim(),
+    )
+    expect(triggers).toEqual([
+      'create trigger orders_guard_status before insert or update on app.orders for each row execute function app.guard_order_status();',
+      'create trigger orders_set_updated_at before update on app.orders for each row execute function app.set_updated_at();',
+      "create trigger orders_audit_change after insert or update on app.orders for each row execute function app.audit_row_change('pos.order', 'branch');",
+      'create trigger order_items_guard_status before insert or update or delete on app.order_items for each row execute function app.guard_order_item_status();',
+      'create trigger order_items_set_updated_at before update on app.order_items for each row execute function app.set_updated_at();',
+      "create trigger order_items_audit_change after insert or update or delete on app.order_items for each row execute function app.audit_row_change('pos.order_item', 'branch');",
+    ])
+  })
+
+  it('revokes both guards from public and leaves audit_row_change ACLs untouched', () => {
+    expect(ORDERS_FLAT).toContain(
+      'revoke execute on function app.guard_order_status() from public;',
+    )
+    expect(ORDERS_FLAT).toContain(
+      'revoke execute on function app.guard_order_item_status() from public;',
+    )
+    expect(ORDERS_FLAT).toContain(
+      'grant execute on function app.guard_order_status() to authenticated;',
+    )
+    expect(ORDERS_FLAT).toContain(
+      'grant execute on function app.guard_order_item_status() to authenticated;',
+    )
+    // audit_row_change keeps its existing ACLs: CREATE OR REPLACE preserves them.
+    expect(ORDERS_FLAT).not.toContain('revoke execute on function app.audit_row_change')
+    expect(ORDERS_FLAT).not.toContain('grant execute on function app.audit_row_change')
+    expect(ORDERS_FLAT).toContain("notify pgrst, 'reload schema cache';")
+  })
+
+  it('backfills kitchen.manage onto the staff system role and mirrors it in bootstrap_organization', () => {
+    expect(ORDERS_FLAT).toContain(
+      "insert into app.role_permissions (role_id, permission_key) select r.id, 'kitchen.manage' from app.roles r where r.is_system and r.name = 'staff' on conflict do nothing;",
+    )
+
+    const bootstrap = lastDeclaration('bootstrap_organization').replace(/\s+/g, ' ')
+    const managerStart = bootstrap.indexOf('system role: manager')
+    const staffStart = bootstrap.indexOf('system role: staff')
+    const ownerStart = bootstrap.indexOf('-- bootstrapper becomes owner')
+    expect(managerStart).toBeGreaterThanOrEqual(0)
+    expect(staffStart).toBeGreaterThan(managerStart)
+    expect(ownerStart).toBeGreaterThan(staffStart)
+
+    const managerSection = bootstrap.slice(managerStart, staffStart)
+    expect(managerSection).toContain("(v_role_id, 'kitchen.manage'),")
+    expect(managerSection).toContain("(v_role_id, 'pos.void'),")
+
+    // D6A: staff (front line) gains kitchen.manage but never pos.void or
+    // pos.discount; tables.manage stays manager+.
+    const staffSection = bootstrap.slice(staffStart, ownerStart)
+    expect(staffSection).toContain("(v_role_id, 'kitchen.manage'),")
+    expect(staffSection).toContain("(v_role_id, 'kitchen.view'),")
+    expect(staffSection).not.toContain("'pos.void'")
+    expect(staffSection).not.toContain("'pos.discount'")
+    expect(staffSection).not.toContain("'tables.manage'")
+  })
+
+  it('redeclares only the expected functions in migration 4', () => {
+    const redeclared = [...ORDERS_SQL.matchAll(/create or replace function\s+app\.(\w+)\s*\(/gi)]
+      .map((m) => m[1])
+      .sort()
+    expect(redeclared).toEqual([
+      'bootstrap_organization',
+      'guard_order_item_status',
+      'guard_order_status',
+    ])
+  })
+})
+
 describe('audit branch attribution (shared helper, D9)', () => {
   it('keeps the helper security definer with an opt-in branch gate only', () => {
     const header = lastDeclarationHeader('audit_row_change')
@@ -757,7 +1071,7 @@ describe('audit branch attribution (shared helper, D9)', () => {
     expect(helper.match(/old\.branch_id/g)).toHaveLength(1)
   })
 
-  it('is invoked with a branch argument only by the new table and reservation triggers', () => {
+  it('is invoked with a branch argument only by the table, reservation and order triggers', () => {
     const invocations = [
       ...ALL_SQL.matchAll(/app\.audit_row_change\('([^']+)'(?:\s*,\s*'([^']*)')?\)/g),
     ].map((m) => [m[1], m[2] ?? null] as const)
@@ -768,6 +1082,8 @@ describe('audit branch attribution (shared helper, D9)', () => {
       ['menu.item', null],
       ['tables.table', 'branch'],
       ['reservations.reservation', 'branch'],
+      ['pos.order', 'branch'],
+      ['pos.order_item', 'branch'],
     ])
   })
 
@@ -831,6 +1147,12 @@ describe('permission catalog (static)', () => {
     expect(referenced.has('audit.view')).toBe(true)
     expect(referenced.has('tables.manage')).toBe(true)
     expect(referenced.has('reservations.view')).toBe(true)
+    expect(referenced.has('pos.view')).toBe(true)
+    expect(referenced.has('pos.create')).toBe(true)
+    expect(referenced.has('pos.edit')).toBe(true)
+    expect(referenced.has('pos.void')).toBe(true)
+    expect(referenced.has('kitchen.view')).toBe(true)
+    expect(referenced.has('kitchen.manage')).toBe(true)
     for (const key of referenced) {
       expect(ALL_CATALOG_KEYS.has(key), `src references unknown permission key '${key}'`).toBe(true)
     }

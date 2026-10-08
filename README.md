@@ -4,11 +4,13 @@
 
 This repository contains the **approved foundation**: cloud deployment
 architecture, central database schema, authentication, granular
-roles/permissions and the audit core — plus two restaurant modules: **Menu**
-(categories, items, prices, images — live in production) and **Tables &
-Reservations** (branch floor plan + six-state guest reservations — built on
-`feat/phase-2-tables-reservations`, staging acceptance pending). The remaining
-ERP modules (rooms, POS, kitchen, inventory, purchasing, accounting, HR/payroll,
+roles/permissions and the audit core — plus three restaurant modules: **Menu**
+(categories, items, prices, images — live in production), **Tables &
+Reservations** (branch floor plan + six-state guest reservations — merged to
+`develop`, staging acceptance passed 2026-10-08, production release awaiting a
+separate owner go) and **Orders & Kitchen** (POS order ticket + kitchen
+display — built on `feat/phase-3-orders-kitchen`, staging acceptance pending).
+The remaining ERP modules (rooms, inventory, purchasing, accounting, HR/payroll,
 assets, reports/PDF, WhatsApp, M-Pesa, Gemini AI) are deliberately **not**
 built yet.
 
@@ -39,8 +41,8 @@ Pages · GitHub Actions.
 
 | Path | Purpose |
 |---|---|
-| `supabase/migrations/` | Foundation schema (organizations, branches, profiles, permission catalog, roles, audit log, RLS, bootstrap RPC) + menu tables and `menu-images` bucket + floor-plan and reservation tables |
-| `src/` | ERP shell: auth flows, org bootstrap, permission-gated dashboard + audit pages, the menu module (`src/pages/menu/`, `src/lib/menu.ts`) and the tables & reservations module (`src/pages/tables/`, `src/pages/reservations/`, `src/lib/tables.ts`, `src/lib/reservations.ts`) |
+| `supabase/migrations/` | Foundation schema (organizations, branches, profiles, permission catalog, roles, audit log, RLS, bootstrap RPC) + menu tables and `menu-images` bucket + floor-plan and reservation tables + order and order-item tables |
+| `src/` | ERP shell: auth flows, org bootstrap, permission-gated dashboard + audit pages, the menu module (`src/pages/menu/`, `src/lib/menu.ts`), the tables & reservations module (`src/pages/tables/`, `src/pages/reservations/`, `src/lib/tables.ts`, `src/lib/reservations.ts`) and the orders & kitchen module (`src/pages/orders/`, `src/pages/kitchen/`, `src/lib/orders.ts`) |
 | `.github/workflows/` | CI, dev migration dispatch, staging deploy, production deploy (+ custom-domain verify) |
 | `docs/ARCHITECTURE.md` | System design, environment model, security model |
 | `docs/PROVISIONING.md` | **Step-by-step runbook** to provision GitHub/Cloudflare/Supabase and go live |
@@ -55,7 +57,8 @@ Pages · GitHub Actions.
 | 1. Architecture & database | ✅ Foundation schema + migrations |
 | 2. Authentication & permissions | ✅ Supabase Auth, roles, granular permissions, RLS, audit core |
 | Menu management (first restaurant module) | ✅ Live in production (released 2026-10-08) |
-| Tables & reservations (second restaurant module) | 🔄 Implemented on `feat/phase-2-tables-reservations` — staging acceptance pending |
+| Tables & reservations (second restaurant module) | ✅ Merged to `develop`; staging acceptance passed 2026-10-08 — production release awaiting owner go |
+| Orders & kitchen (third restaurant module) | 🔄 Implemented on `feat/phase-3-orders-kitchen` — staging acceptance pending |
 | Remaining roadmap phases | ⏳ Not started — each begins only with explicit approval |
 
 ## Commands (CI parity)
