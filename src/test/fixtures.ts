@@ -6,6 +6,8 @@ import type {
   MenuItem,
   Organization,
   Profile,
+  RestaurantTable,
+  TableReservation,
 } from '../types/database'
 
 export const TEST_USER_ID = '11111111-1111-4111-8111-111111111111'
@@ -13,6 +15,9 @@ export const TEST_ORG_ID = '22222222-2222-4222-8222-222222222222'
 export const TEST_BRANCH_ID = '33333333-3333-4333-8333-333333333333'
 export const TEST_CATEGORY_ID = '44444444-4444-4444-8444-444444444444'
 export const TEST_ITEM_ID = '55555555-5555-4555-8555-555555555555'
+export const TEST_TABLE_ID = '66666666-6666-4666-8666-666666666666'
+export const TEST_RESERVATION_ID = '88888888-8888-4888-8888-888888888888'
+export const TEST_SECOND_BRANCH_ID = '99999999-9999-4999-8999-999999999999'
 
 const NOW = '2026-01-01T00:00:00.000Z'
 
@@ -85,6 +90,43 @@ export function makeMenuItem(overrides: Partial<MenuItem> = {}): MenuItem {
     image_path: null,
     is_available: true,
     is_active: true,
+    created_at: NOW,
+    updated_at: NOW,
+    ...overrides,
+  }
+}
+
+export function makeRestaurantTable(overrides: Partial<RestaurantTable> = {}): RestaurantTable {
+  return {
+    id: TEST_TABLE_ID,
+    organization_id: TEST_ORG_ID,
+    branch_id: TEST_BRANCH_ID,
+    name: 'Table 1',
+    zone: 'Main',
+    capacity: 4,
+    sort_order: 0,
+    is_active: true,
+    created_at: NOW,
+    updated_at: NOW,
+    ...overrides,
+  }
+}
+
+// starts_at 16:00Z renders as 19:00 in Africa/Nairobi (the org test timezone).
+export function makeReservation(overrides: Partial<TableReservation> = {}): TableReservation {
+  return {
+    id: TEST_RESERVATION_ID,
+    organization_id: TEST_ORG_ID,
+    branch_id: TEST_BRANCH_ID,
+    table_id: TEST_TABLE_ID,
+    guest_name: 'Grace Wanjiru',
+    guest_phone: '+254700000000',
+    party_size: 2,
+    starts_at: '2026-01-01T16:00:00.000Z',
+    duration_minutes: 120,
+    ends_at: '2026-01-01T18:00:00.000Z',
+    status: 'confirmed',
+    notes: '',
     created_at: NOW,
     updated_at: NOW,
     ...overrides,

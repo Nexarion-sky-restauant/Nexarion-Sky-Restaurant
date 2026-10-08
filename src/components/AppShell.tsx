@@ -12,6 +12,8 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { to: '/', label: 'Dashboard', icon: '▦', permission: 'dashboard.view' },
   { to: '/menu', label: 'Menu', icon: '✦' },
+  { to: '/tables', label: 'Tables', icon: '▤' },
+  { to: '/reservations', label: 'Reservations', icon: '◷', permission: 'reservations.view' },
   { to: '/audit', label: 'Audit Log', icon: '≣', permission: 'audit.view' },
 ]
 
@@ -55,9 +57,9 @@ export default function AppShell() {
 
         <div className="sidebar-note">
           <div className="sidebar-note-title">Foundation</div>
-          Foundation phases 1–2 are complete and the Menu module is live. Rooms,
-          POS, inventory, accounting and the remaining departments activate in
-          their approved phases.
+          Menu Management, Tables and Reservations are live. Rooms, POS,
+          inventory, accounting and the remaining departments activate in their
+          approved phases.
         </div>
       </aside>
 

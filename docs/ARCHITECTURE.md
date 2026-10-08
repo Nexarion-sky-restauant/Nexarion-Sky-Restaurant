@@ -78,8 +78,10 @@
 - **Audit**: `app.audit_log` is append-only — no UPDATE/DELETE grants exist.
   Inserts must be self-attributed (`actor_id = auth.uid()`), and the normal
   path is the server-stamping `app.log_audit` function. The reusable
-  `app.audit_row_change` trigger captures every menu create/update with full
-  before/after JSONB.
+  `app.audit_row_change` trigger captures every menu, table and reservation
+  create/update with full before/after JSONB; branch attribution is opt-in via
+  a second trigger argument (`'branch'`), so branch-scoped entities record the
+  row's branch while org-wide rows keep `branch_id` NULL by construction.
 - **Storage**: buckets are private; rules on `storage.objects` mirror table RLS
   per organization folder (`{organization_id}/…`). Menu images: members read,
   `menu.manage` write, no delete in v1 — served to the SPA as short-lived
@@ -88,8 +90,12 @@
 ## What intentionally does not exist yet
 
 The Menu module (categories, items, prices, images; migration
-`20261008000002` + `src/pages/menu/`) is the first functional module. Rooms/
-bookings/folios, POS, kitchen, inventory, purchasing, accounting, HR, payroll,
-assets, reports/PDF, WhatsApp, M-Pesa, Gemini intentionally do not exist yet.
-Each arrives in its approved phase with its own migration set extending this
-foundation.
+`20261008000002` + `src/pages/menu/`) is live in production. The Tables &
+Reservations module (branch floor plan + six-state reservation workflow;
+migration `20261008000003` + `src/pages/tables/`, `src/pages/reservations/`)
+is built and in staging acceptance. Walk-ins and stored occupancy deliberately
+do not exist yet — table availability is derived from reservations, and
+occupancy tracking arrives with Orders & Kitchen. Rooms/bookings/folios, POS,
+kitchen, inventory, purchasing, accounting, HR, payroll, assets, reports/PDF,
+WhatsApp, M-Pesa, Gemini intentionally do not exist yet. Each arrives in its
+approved phase with its own migration set extending this foundation.

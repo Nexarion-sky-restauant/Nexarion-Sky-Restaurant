@@ -83,6 +83,44 @@ export type MenuItem = {
   updated_at: string
 }
 
+export type ReservationStatus =
+  | 'pending'
+  | 'confirmed'
+  | 'seated'
+  | 'completed'
+  | 'cancelled'
+  | 'no_show'
+
+export type RestaurantTable = {
+  id: string
+  organization_id: string
+  branch_id: string
+  name: string
+  zone: string
+  capacity: number
+  sort_order: number
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+export type TableReservation = {
+  id: string
+  organization_id: string
+  branch_id: string
+  table_id: string
+  guest_name: string
+  guest_phone: string
+  party_size: number
+  starts_at: string
+  duration_minutes: number
+  ends_at: string
+  status: ReservationStatus
+  notes: string
+  created_at: string
+  updated_at: string
+}
+
 export interface AccessPayload {
   profile: Profile | null
   organization: Organization | null
@@ -127,6 +165,22 @@ export interface Database {
         Row: MenuItem
         Insert: Omit<MenuItem, 'id' | 'created_at' | 'updated_at'> & { id?: string }
         Update: Partial<Omit<MenuItem, 'id' | 'organization_id'>>
+        Relationships: []
+      }
+      restaurant_tables: {
+        Row: RestaurantTable
+        Insert: Omit<RestaurantTable, 'id' | 'created_at' | 'updated_at'> & { id?: string }
+        Update: Partial<Omit<RestaurantTable, 'id' | 'organization_id' | 'branch_id'>>
+        Relationships: []
+      }
+      table_reservations: {
+        Row: TableReservation
+        // ends_at is derived server-side from starts_at + duration_minutes by
+        // app.set_reservation_window, so clients never supply it.
+        Insert: Omit<TableReservation, 'id' | 'created_at' | 'updated_at' | 'ends_at'> & {
+          id?: string
+        }
+        Update: Partial<Omit<TableReservation, 'id' | 'organization_id' | 'branch_id' | 'ends_at'>>
         Relationships: []
       }
     }
