@@ -587,6 +587,94 @@ h1, h2, h3 {
 .modal-title { font-size: 1.35rem; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
 
+/* ── Tables & Reservations (Phase 2) ────────────────────────────────────── */
+.page-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 18px; }
+.page-controls-spacer { flex: 1; }
+.control-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-dim);
+  font-size: 0.86rem;
+}
+.control-inline > span:first-child {
+  color: var(--gold);
+  font-size: 0.68rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+.control-inline select,
+.control-inline input[type='date'],
+.control-inline input[type='time'] {
+  color-scheme: dark;
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 9px 11px;
+  color: var(--text);
+  font-size: 0.86rem;
+  font-family: var(--font-body);
+}
+.control-inline select:focus,
+.control-inline input:focus {
+  outline: none;
+  border-color: var(--gold-deep);
+  box-shadow: 0 0 0 3px var(--gold-wash);
+}
+.field input[type='date'],
+.field input[type='time'] { color-scheme: dark; }
+
+.section-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.section-title { font-size: 1.25rem; }
+.section-count { color: var(--text-faint); font-size: 0.8rem; letter-spacing: 0.08em; }
+
+.floor-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 12px;
+}
+.floor-table {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.floor-table-inactive { opacity: 0.55; border-style: dashed; }
+.floor-table-name { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.floor-table-meta { color: var(--text-dim); font-size: 0.82rem; }
+.floor-table .btn { align-self: flex-start; }
+
+.res-list { display: flex; flex-direction: column; }
+.res-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
+}
+.res-row:last-child { border-bottom: none; }
+.res-time { display: flex; flex-direction: column; min-width: 58px; }
+.res-start { font-family: var(--font-display); font-size: 1.05rem; }
+.res-window { color: var(--text-faint); font-size: 0.78rem; }
+.res-main { flex: 1; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.res-guest { display: flex; align-items: center; gap: 10px; font-weight: 600; flex-wrap: wrap; }
+.res-meta { color: var(--text-dim); font-size: 0.84rem; }
+.res-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+
+.pill-pending { border-style: dashed; color: var(--text-dim); }
+.pill-confirmed { color: var(--gold); border-color: var(--gold-line); background: var(--gold-wash); }
+.pill-seated { color: var(--on-gold); background: var(--gold-gradient); border-color: transparent; }
+.pill-completed { color: var(--text-faint); border-color: var(--border); }
+.pill-cancelled {
+  color: var(--danger-text);
+  background: var(--danger-bg);
+  border-color: rgba(196, 112, 94, 0.55);
+}
+.pill-no_show { color: var(--danger-text); border-style: dashed; border-color: rgba(196, 112, 94, 0.55); }
+
 /* ── Responsive ─────────────────────────────────────────────────────────── */
 @media (max-width: 920px) {
   .shell { flex-direction: column; }
@@ -638,4 +726,11 @@ h1, h2, h3 {
   .menu-category-head { flex-direction: column; }
   .menu-category-actions { width: 100%; }
   .modal-actions .btn { flex: 1; }
+}
+
+@media (max-width: 620px) {
+  .page-controls { flex-wrap: wrap; row-gap: 10px; }
+  .page-controls-spacer { display: none; }
+  .res-row { flex-direction: column; gap: 8px; }
+  .res-actions { justify-content: flex-start; }
 }
