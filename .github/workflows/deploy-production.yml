@@ -51,6 +51,11 @@ jobs:
       # verify-domain deliberately has no `environment:`, so it cannot read the
       # environment-scoped CLOUDFLARE_PAGES_PROJECT variable itself.
       pages_project: ${{ vars.CLOUDFLARE_PAGES_PROJECT }}
+      # The unique deployment URL is the authoritative source of the build we
+      # just uploaded. Passing it to verify-domain prevents a propagation race
+      # where both the custom domain and the project alias still serve the old
+      # deployment while looking identical to each other.
+      deployment_url: ${{ steps.deploy.outputs.deployment-url }}
     env:
       VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
       VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
@@ -72,6 +77,7 @@ jobs:
       - run: npm run build
 
       - name: Deploy to Cloudflare Pages
+        id: deploy
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -109,6 +115,10 @@ jobs:
     env:
       DOMAIN: ${{ vars.APP_CUSTOM_DOMAIN }}
       PROJECT: ${{ needs.build-deploy.outputs.pages_project }}
+      # The unique deployment URL is authoritative for the build we just
+      # uploaded. Comparing the domain and alias against it closes the
+      # propagation race where both older hosts still serve the previous build.
+      DEPLOYMENT_URL: ${{ needs.build-deploy.outputs.deployment_url }}
       CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
     steps:
