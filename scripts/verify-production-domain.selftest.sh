@@ -70,8 +70,13 @@ expect_grep "a naive substring grep would over-match"       'nexarionsky\.com'  
 # The race case (domain AND alias both stale, deployment fresh) MUST fail -
 # that is the exact false positive this fix removes.
 # ---------------------------------------------------------------------------
-SERVING_DIR=$(mktemp -d)
-trap 'rm -rf "$SERVING_DIR"' EXIT
+SERVING_DIR=$(mktemp -d)   # holds the HTML fixtures the curl stub serves
+RUN_DIR=$(mktemp -d)       # holds the files verify_serving writes
+trap 'rm -rf "$SERVING_DIR" "$RUN_DIR"' EXIT
+# Run from a directory separate from the fixtures: verify_serving writes
+# apex.html/expected.html/alias.html, and alias.html would otherwise clobber
+# the alias.html fixture.
+cd "$RUN_DIR"
 
 write_html() { # $1 = filename, $2 = js asset, $3 = css asset
   printf '<!doctype html><html><body><div id="root"></div><script type="module" src="/assets/%s"></script><link rel="stylesheet" href="/assets/%s"></body></html>\n' \
