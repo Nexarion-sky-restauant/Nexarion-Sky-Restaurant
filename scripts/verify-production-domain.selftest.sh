@@ -62,6 +62,79 @@ expect_code "API error is rejected"                   domain-api-error.json    1
 expect_grep "fixtures are pretty-printed like the real API" '"name":"nexarionsky.com"' domain-active.json no
 expect_grep "a naive substring grep would over-match"       'nexarionsky\.com'         domain-wrong-domain.json yes
 
+# ---------------------------------------------------------------------------
+# Offline serving-check tests for the propagation-race fix.
+#
+# The real verify_serving fetches three hosts. We stub `curl` so each URL maps
+# to a local fixture, then assert the pass/fail decision for four scenarios.
+# The race case (domain AND alias both stale, deployment fresh) MUST fail -
+# that is the exact false positive this fix removes.
+# ---------------------------------------------------------------------------
+SERVING_DIR=$(mktemp -d)
+trap 'rm -rf "$SERVING_DIR"' EXIT
+
+write_html() { # $1 = filename, $2 = js asset, $3 = css asset
+  printf '<!doctype html><html><body><div id="root"></div><script type="module" src="/assets/%s"></script><link rel="stylesheet" href="/assets/%s"></body></html>\n' \
+    "$2" "$3" > "$SERVING_DIR/$1"
+}
+echo "console.log(1)" > "$SERVING_DIR/probe.js"
+
+curl() {
+  local url="" out="" a prev=""
+  for a in "$@"; do
+    if [ "$prev" = "-o" ]; then out="$a"; fi
+    case "$a" in http://*|https://*) url="$a" ;; esac
+    prev="$a"
+  done
+  local fixture=""
+  case "$url" in
+    "https://nexarionsky.com/")            fixture="domain.html" ;;
+    "https://nexarion-sky.pages.dev/")     fixture="alias.html" ;;
+    "https://new-dep.nexarion-sky.pages.dev/") fixture="deployment.html" ;;
+    "https://nexarionsky.com/assets/index-NEW.js") fixture="probe.js" ;;
+    "https://nexarionsky.com/assets/index-OLD.js") fixture="probe.js" ;;
+  esac
+  if [ -n "$fixture" ] && [ -f "$SERVING_DIR/$fixture" ]; then
+    [ "$out" = "/dev/null" ] || cat "$SERVING_DIR/$fixture" > "$out"
+    return 0
+  fi
+  return 1
+}
+
+expect_rc() { # $1 = label, $2 = expected exit code of verify_serving
+  local label="$1" want="$2" got
+  verify_serving >/dev/null 2>&1
+  got=$?
+  if [ "$got" = "$want" ]; then
+    echo "PASS  $label (exit $got)"
+  else
+    echo "FAIL  $label: expected exit $want, got $got"
+    failures=$((failures + 1))
+  fi
+}
+
+PROJECT=nexarion-sky
+DEPLOYMENT_URL=https://new-dep.nexarion-sky.pages.dev
+
+write_html domain.html     index-OLD.js index-OLD.css
+write_html alias.html      index-OLD.js index-OLD.css
+write_html deployment.html index-NEW.js index-NEW.css
+expect_rc "race: stale domain+alias vs fresh deployment is REJECTED" 1
+
+write_html domain.html     index-NEW.js index-NEW.css
+write_html alias.html      index-NEW.js index-NEW.css
+write_html deployment.html index-NEW.js index-NEW.css
+expect_rc "all hosts current: accepted" 0
+
+DEPLOYMENT_URL=""
+write_html domain.html index-NEW.js index-NEW.css
+write_html alias.html  index-NEW.js index-NEW.css
+expect_rc "fallback: domain matches alias, accepted" 0
+
+write_html domain.html index-NEW.js index-NEW.css
+write_html alias.html  index-OLD.js index-OLD.css
+expect_rc "fallback: domain differs from alias, REJECTED" 1
+
 echo
 if [ "$failures" -ne 0 ]; then
   echo "$failures self-test(s) failed."

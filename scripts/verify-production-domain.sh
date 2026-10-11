@@ -7,7 +7,14 @@
 #
 # Required environment: DOMAIN, PROJECT, CF_ACCOUNT_ID, CF_API_TOKEN
 # Optional environment: CF_API_BASE, ATTEMPTS, SLEEP_SECONDS,
-#                       SERVING_ATTEMPTS, SERVING_SLEEP_SECONDS
+#                       SERVING_ATTEMPTS, SERVING_SLEEP_SECONDS,
+#                       DEPLOYMENT_URL
+#
+# DEPLOYMENT_URL (optional) is the unique *.pages.dev URL emitted by the deploy
+# step for the build we just uploaded. When set, it is the authoritative source
+# of "the current build": the custom domain and project alias are both compared
+# against it. Without it (e.g. the standalone re-verify workflow), the script
+# falls back to comparing the custom domain against the project alias.
 #
 # Sourcing this file only defines functions and defaults, so the self-test can
 # exercise assert_domain_json against recorded fixtures with no network access.
@@ -19,6 +26,7 @@ ATTEMPTS="${ATTEMPTS:-10}"
 SLEEP_SECONDS="${SLEEP_SECONDS:-30}"
 SERVING_ATTEMPTS="${SERVING_ATTEMPTS:-4}"
 SERVING_SLEEP_SECONDS="${SERVING_SLEEP_SECONDS:-20}"
+DEPLOYMENT_URL="${DEPLOYMENT_URL:-}"
 
 # Exit codes: 0 = active, 10 = still pending (a propagation delay), 1 = hard failure.
 assert_domain_json() {
@@ -67,7 +75,7 @@ assets_from_html() {
 }
 
 verify_serving() {
-  local domain_assets alias_assets probe
+  local domain_assets alias_assets expected_assets expected_host probe
 
   curl -fsS --retry 3 -o apex.html "https://$DOMAIN/" || {
     echo "https://$DOMAIN/ did not return a successful response."
@@ -94,6 +102,52 @@ verify_serving() {
     return 1
   }
 
+  if [ -n "$DEPLOYMENT_URL" ]; then
+    # Authoritative expectation: the unique deployment we just uploaded. This
+    # is what closes the propagation race - without it, a custom domain and a
+    # project alias that BOTH still serve the previous build look identical and
+    # the check passes while the site is stale.
+    expected_host="${DEPLOYMENT_URL#https://}"
+    expected_host="${expected_host%/}"
+    curl -fsS --retry 3 -o expected.html "https://${expected_host}/" || {
+      echo "Could not read the just-deployed build at https://${expected_host}/."
+      return 1
+    }
+    expected_assets=$(assets_from_html <expected.html)
+    if [ -z "$expected_assets" ]; then
+      echo "No hashed asset reference found at the deployment URL https://${expected_host}/."
+      return 1
+    fi
+
+    if [ "$domain_assets" != "$expected_assets" ]; then
+      echo "Build mismatch between https://$DOMAIN and the just-deployed build at https://${expected_host}/."
+      echo "--- custom domain ---"
+      printf '%s\n' "$domain_assets"
+      echo "--- deployment URL ---"
+      printf '%s\n' "$expected_assets"
+      return 1
+    fi
+
+    # The project alias must also have caught up with the same build.
+    if curl -fsS --retry 3 -o alias.html "https://$PROJECT.pages.dev/"; then
+      alias_assets=$(assets_from_html <alias.html)
+      if [ -n "$alias_assets" ] && [ "$alias_assets" != "$expected_assets" ]; then
+        echo "Build mismatch between https://$PROJECT.pages.dev and the just-deployed build at https://${expected_host}/."
+        echo "--- project alias ---"
+        printf '%s\n' "$alias_assets"
+        echo "--- deployment URL ---"
+        printf '%s\n' "$expected_assets"
+        return 1
+      fi
+    fi
+
+    echo "https://$DOMAIN is active and serving the just-deployed production build:"
+    printf '%s\n' "$domain_assets"
+    return 0
+  fi
+
+  # Fallback (no DEPLOYMENT_URL available, e.g. the standalone re-verify
+  # workflow): the custom domain must match the project alias.
   curl -fsS --retry 3 -o alias.html "https://$PROJECT.pages.dev/" || {
     echo "Could not read https://$PROJECT.pages.dev/ to compare builds."
     return 1
@@ -114,6 +168,7 @@ verify_serving() {
   printf '%s\n' "$domain_assets"
   return 0
 }
+
 
 main() {
   : "${DOMAIN:?DOMAIN is required}"
